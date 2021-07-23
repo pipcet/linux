@@ -264,8 +264,13 @@
 #define TCR_IPS_MASK		(UL(7) << TCR_IPS_SHIFT)
 #define TCR_A1			(UL(1) << 22)
 #define TCR_ASID16		(UL(1) << 36)
+#ifdef CONFIG_ARM64_TBI
 #define TCR_TBI0		(UL(1) << 37)
 #define TCR_TBI1		(UL(1) << 38)
+#else /* CONFIG_ARM64_TBI */
+#define TCR_TBI0		(UL(0) << 37)
+#define TCR_TBI1		(UL(0) << 38)
+#endif /* CONFIG_ARM64_TBI */
 #define TCR_HA			(UL(1) << 39)
 #define TCR_HD			(UL(1) << 40)
 #define TCR_TBID1		(UL(1) << 52)

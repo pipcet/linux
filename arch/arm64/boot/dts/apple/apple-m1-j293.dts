@@ -632,10 +632,21 @@
 			};
 		};
 
-		usb_dart1: usb_dart1@502f00000 {
+		usb_dart1_0: iommu@502f00000 {
 			compatible = "apple,dart-m1";
 			clocks = <&atc1_usb>;
-			reg = <0x5 0x02f00000 0x0 0x80000   0x5 0x02f80000 0x0 0x4000>;
+			reg = <0x5 0x02f00000 0x0 0x80000>;
+			interrupts = <0 861 4>;
+			page-bits = <14>;
+			sid-mask = <11>;
+			sid-remap = <0 1>;
+			#iommu-cells = <1>;
+		};
+
+		usb_dart1_1: iommu@502f80000 {
+			compatible = "apple,dart-m1";
+			clocks = <&atc1_usb>;
+			reg = <0x5 0x02f80000 0x0 0x4000>;
 			interrupts = <0 861 4>;
 			page-bits = <14>;
 			sid-mask = <11>;
@@ -656,7 +667,7 @@
 				compatible = "snps,dwc3";
 				reg = <0x5 0x02280000 0x0 0x100000>;
 				interrupts = <0 857 4>;
-				iommus = <&usb_dart1 1>;
+				iommus = <&usb_dart1_0 0 &usb_dart1_1 1>;
 				#address-cells = <1>;
 				#size-cells = <0>;
 				dr_mode = "host";
@@ -713,7 +724,7 @@
 
 		pcie_dart0: pcie_dart0@681008000 {
 			compatible = "apple,dart-m1";
-			clocks = <&pcie_gp_clk>;
+			clocks = <&pcie_gp_clk &pcie_smc_poweron>;
 			reg = <0x6 0x81008000 0x0 0x4000>;
 			interrupts = <0 696 4>;
 			pcie-dart;
@@ -724,7 +735,7 @@
 
 		pcie_dart1: pcie_dart1@682008000 {
 			compatible = "apple,dart-m1";
-			clocks = <&pcie_gp_clk>;
+			clocks = <&pcie_gp_clk &pcie_smc_poweron>;
 			reg = <0x6 0x82008000 0x0 0x4000>;
 			interrupts = <0 699 4>;
 			pcie-dart;
@@ -735,7 +746,7 @@
 
 		pcie_dart2: pcie_dart2@683008000 {
 			compatible = "apple,dart-m1";
-			clocks = <&pcie_gp_clk>;
+			clocks = <&pcie_gp_clk &pcie_smc_poweron>;
 			reg = <0x6 0x83008000 0x0 0x4000>;
 			interrupts = <0 702 4>;
 			pcie-dart;
@@ -790,6 +801,12 @@
 			};
 		};
 
+		pcie_smc_poweron: gpio-gate-clock@0d {
+			compatible = "gpio-gate-clock";
+			enable-gpios = <&smc 13 0>;
+			#clock-cells = <0>;
+		};
+
 		pcie: pcie@690000000 {
 			compatible = "apple,pcie-m1";
 			reg = <0x6 0x90000000 0x0 0x1000000																 /* config */
@@ -801,16 +818,12 @@
 				0 712 1   0 713 1   0 714 1   0 715 1   0 716 1   0 717 1   0 718 1   0 719 1
 				0 720 1   0 721 1   0 722 1   0 723 1   0 724 1   0 725 1   0 726 1   0 727 1
 				0 728 1   0 729 1   0 730 1   0 731 1   0 732 1   0 733 1   0 734 1   0 735 1>;
-			clocks = <&pcie_gp_clk &pcie_clk &pcie_refclk>;
+			clocks = <&pcie_gp_clk &pcie_clk &pcie_refclk &pcie_smc_poweron>;
 			clock-names = "core", "aux", "ref";
 			pinctrl-0 = <&pcie_clkreq_pins>;
 			pinctrl-names = "default";
 			perst-gpios = <&gpio 152 0   &gpio 153 0   &gpio 33 0>;
 			clkreq-gpios = <&gpio 150 0   &gpio 151 0   &gpio 32 0>;
-			devpwr-gpios = <&smc 13 0>;
-			devpwr-on-0 = <0 1>;
-			devpwr-on-1 = <>;
-			devpwr-on-2 = <>;
 			#address-cells = <3>;
 			#size-cells = <2>;
 			#interrupt-cells = <1>;

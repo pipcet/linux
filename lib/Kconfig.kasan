@@ -85,6 +85,7 @@ config KASAN_GENERIC
 
 config KASAN_SW_TAGS
 	bool "Software tag-based mode"
+	depends on ARM64_TBI
 	depends on HAVE_ARCH_KASAN_SW_TAGS && CC_HAS_KASAN_SW_TAGS
 	select SLUB_DEBUG if SLUB
 	select CONSTRUCTORS
@@ -108,6 +109,7 @@ config KASAN_SW_TAGS
 
 config KASAN_HW_TAGS
 	bool "Hardware tag-based mode"
+	depends on ARM64_TBI
 	depends on HAVE_ARCH_KASAN_HW_TAGS
 	depends on SLUB
 	help

@@ -360,6 +360,10 @@ source "arch/arm64/Kconfig.platforms"
 
 menu "Kernel Features"
 
+config ARM64_TBI
+	bool "Enable support for Top Byte Ignore (TBI)"
+	default y
+
 menu "ARM errata workarounds via the alternatives framework"
 
 config ARM64_WORKAROUND_CLEAN_CACHE
@@ -1215,6 +1219,7 @@ config ARM64_SW_TTBR0_PAN
 config ARM64_TAGGED_ADDR_ABI
 	bool "Enable the tagged user addresses syscall ABI"
 	default y
+	depends on ARM64_TBI
 	help
 	  When this option is enabled, user applications can opt in to a
 	  relaxed ABI via prctl() allowing tagged addresses to be passed
@@ -1652,6 +1657,7 @@ config ARM64_AS_HAS_MTE
 config ARM64_MTE
 	bool "Memory Tagging Extension support"
 	default y
+	depends on ARM64_TBI
 	depends on ARM64_AS_HAS_MTE && ARM64_TAGGED_ADDR_ABI
 	depends on AS_HAS_ARMV8_5
 	depends on AS_HAS_LSE_ATOMICS

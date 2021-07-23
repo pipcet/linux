@@ -215,8 +215,12 @@ static inline unsigned long kaslr_offset(void)
  * up with a tagged userland pointer. Clear the tag to get a sane pointer to
  * pass on to access_ok(), for instance.
  */
-#define __untagged_addr(addr)	\
+#ifdef CONFIG_ARM64_TBI
+#define __untagged_addr(addr) \
 	((__force __typeof__(addr))sign_extend64((__force u64)(addr), 55))
+#else /* CONFIG_ARM64_TBI */
+#define __untagged_addr(addr) (addr)
+#endif /* CONFIG_ARM64_TBI */
 
 #define untagged_addr(addr)	({					\
 	u64 __addr = (__force u64)(addr);					\
