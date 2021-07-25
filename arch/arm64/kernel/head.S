@@ -92,7 +92,8 @@ SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
 	bl	cpuinit
 	bl	init_kernel_el			// w0=cpu_boot_mode
-	mov     x23, #0xb00000000
+	adrp	x23, __PHYS_OFFSET
+	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
 	bl	set_cpu_boot_mode_flag
 	bl	__create_page_tables
 	/*
