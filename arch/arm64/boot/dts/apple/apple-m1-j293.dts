@@ -1017,6 +1017,27 @@
 			compatible = "apple,wdt";
 			reg = <0x2 0x3d2b0000 0x00 0x4000>;
 		};
+
+		dcp_mbox: dcp_mbox@231c00000 {
+		        compatible = "apple,apple-bare-mailbox";
+			reg = <0x2 0x31c08000 0 0x4000>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			interrupts = <0 0x1ab 4  0 0x1ae 4>;
+		};
+
+		dcp_funnel: dcp_funnel@0 {
+			compatible = "apple,apple-mailbox-funnel";
+			#mbox-cells = <1>;
+			endpoints = <32 0x37>;
+			mboxes = <&dcp_mbox 0>;
+		};
+
+		dcp_asc: dcp_asc@231c00000 {
+		        compatible = "apple,apple-asc";
+			reg = <0x2 0x31c00000 0 0x8000 0xb 0xe6194000 0 0x19e6c000>;
+			mboxes = <&dcp_funnel 0 &dcp_funnel 1 &dcp_funnel 2 &dcp_funnel 4>;
+		};
 	};
 	leds {
 		compatible = "pwm-leds";
@@ -1030,11 +1051,11 @@
 		};
 	};
 
-	 backlight: backlight {
+	backlight: backlight {
 		compatible = "gpio-backlight";
 		gpios = <&smc 18 0>;
 		default-on;
 		status = "okay";
 		phandle = <0x02>;
 	};
- };
+};
