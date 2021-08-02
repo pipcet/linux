@@ -117,7 +117,7 @@ static unsigned apple_iop_mailbox_ep0_next_discovered_ep(struct apple_iop_mailbo
 						     unsigned ep)
 {
 	while(ep < am->num_ep) {
-		if(am->ep[ep].discovered)
+		if(am->ep[ep].discovered && ep != 2)
 			return ep;
 		ep ++;
 	}
