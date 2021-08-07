@@ -1,6 +1,6 @@
 struct kvbox_prop {
 	size_t key_len;
-	void *key;
+	const void *key;
 	size_t data_len;
 	void *data;
 	const char *type;
