@@ -427,7 +427,7 @@ MODULE_DEVICE_TABLE(of, smc_of_match);
 
 static struct platform_driver smc_platform_driver = {
 	.driver = {
-		.name = "apple-m1-smc-new",
+		.name = "apple-asc-smc",
 		.of_match_table = smc_of_match,
         },
 	.probe = smc_probe,
