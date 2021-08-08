@@ -182,5 +182,11 @@
 			dr_mode = "host";
 			iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
 		};
+
+		watchdog@23d2b0000 {
+			compatible = "apple,t8103-wdt";
+			reg = <0x2 0x3d2b0000 0x0 0x4000>;
+			clocks = <&clk24>;
+		};
 	};
 };
