@@ -1001,6 +1001,18 @@ config MSC313E_WATCHDOG
 	  To compile this driver as a module, choose M here: the
 	  module will be called msc313e_wdt.
 
+config APPLE_M1_WATCHDOG
+	tristate "Apple M1 watchdog timer support"
+	depends on ARCH_APPLE && OF || COMPILE_TEST
+	default ARCH_APPLE
+	select WATCHDOG_CORE
+	help
+	  Say Y here to include support for the watchdog timer on Apple M1
+	  systems. This is the standard way of rebooting these systems.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called apple_wdt.
+
 # X86 (i386 + ia64 + x86_64) Architecture
 
 config ACQUIRE_WDT
