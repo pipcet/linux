@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/pwm/apple,fpwm.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Apple M1 FPWM controller
+
+maintainers:
+  - Pip Cet <pipcet@gmail.com>
+
+description:
+  Single-channel PWM connected to the keyboard backlight on at least
+  some MacBook Pros.
+
+allOf:
+  - $ref: pwm.yaml#
+
+properties:
+  compatible:
+    const: apple,t8103-fpwm
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  "#pwm-cells":
+    const: 0
+
+additionalProperties: false
+
+required:
+  - reg
+  - clocks
+
+examples:
+  - |
+    pwm@235044000 {
+        compatible = "apple,t8103-fpwm";
+        reg = <0x35044000 0x4000>;
+        clocks = <&fpwm0_clk>;
+        #pwm-cells = <0>;
+    };
