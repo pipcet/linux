@@ -475,11 +475,8 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 	return 0;
 }
 
-extern int fiq_init_cpu(unsigned int cpu);
-
 static int aic_init_cpu(unsigned int cpu)
 {
-	fiq_init_cpu(cpu);
 	/* Mask all hard-wired per-CPU IRQ sources */
 
 	/* EL2-only (VHE mode) IRQ sources */
