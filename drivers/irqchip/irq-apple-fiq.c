@@ -9,33 +9,13 @@
  */
 
 /*
- * AIC is a fairly simple interrupt controller with the following features:
- *
- * - 896 level-triggered hardware IRQs
- *   - Single mask bit per IRQ
- *   - Per-IRQ affinity setting
- *   - Automatic masking on event delivery (auto-ack)
- *   - Software triggering (ORed with hw line)
- * - 2 per-CPU IPIs (meant as "self" and "other", but they are
- *   interchangeable if not symmetric)
- * - Automatic prioritization (single event/ack register per CPU, lower IRQs =
- *   higher priority)
- * - Automatic masking on ack
- * - Default "this CPU" register view and explicit per-CPU views
- *
- * In addition, this driver also handles FIQs, as these are routed to the same
- * IRQ vector. These are used for Fast IPIs (TODO), the ARMv8 timer IRQs, and
- * performance counters (TODO).
+ * This driver handles FIQs. These are used for Fast IPIs (TODO), the
+ * ARMv8 timer IRQs, and performance counters (TODO).
  *
  * Implementation notes:
  *
- * - This driver creates two IRQ domains, one for HW IRQs and internal FIQs,
- *   and one for IPIs.
- * - Since Linux needs more than 2 IPIs, we implement a software IRQ controller
- *   and funnel all IPIs into one per-CPU IPI (the second "self" IPI is unused).
- * - FIQ hwirq numbers are assigned after true hwirqs, and are per-cpu.
+ * - This driver creates one IRQ domain, for FIQs.
  * - DT bindings use 3-cell form (like GIC):
- *   - <0 nr flags> - hwirq #nr
  *   - <1 nr flags> - FIQ #nr
  *     - nr=0  Physical HV timer
  *     - nr=1  Virtual HV timer
@@ -57,9 +37,6 @@
 #include <asm/exception.h>
 #include <asm/sysreg.h>
 #include <asm/virt.h>
-
-#define MASK_REG(x)		(4 * ((x) >> 5))
-#define MASK_BIT(x)		BIT((x) & GENMASK(4, 0))
 
 /*
  * IMP-DEF sysregs that control FIQ sources
@@ -112,8 +89,7 @@
 #define SYS_IMP_APL_UPMSR_EL1		sys_reg(3, 7, 15, 6, 4)
 #define UPMSR_IACT			BIT(0)
 
-#define AIC_NR_FIQ		4
-#define AIC_NR_SWIPI		32
+#define NR_FIQ			4
 
 /*
  * FIQ hwirq index definitions: FIQ sources use the DT binding defines
@@ -125,10 +101,10 @@
  * mapping differs and aic_irq_domain_translate() performs the remapping.
  */
 
-#define AIC_TMR_EL0_PHYS	AIC_TMR_HV_PHYS
-#define AIC_TMR_EL0_VIRT	AIC_TMR_HV_VIRT
-#define AIC_TMR_EL02_PHYS	AIC_TMR_GUEST_PHYS
-#define AIC_TMR_EL02_VIRT	AIC_TMR_GUEST_VIRT
+#define TMR_EL0_PHYS	TMR_HV_PHYS
+#define TMR_EL0_VIRT	TMR_HV_VIRT
+#define TMR_EL02_PHYS	TMR_GUEST_PHYS
+#define TMR_EL02_VIRT	TMR_GUEST_VIRT
 
 struct aic_irq_chip {
 	void __iomem *base;
@@ -146,22 +122,22 @@ static struct aic_irq_chip *aic_irqc;
  * FIQ irqchip
  */
 
-static unsigned long aic_fiq_get_idx(struct irq_data *d)
+static unsigned long fiq_get_idx(struct irq_data *d)
 {
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
 
-	return irqd_to_hwirq(d) - ic->nr_hw;
+	return irqd_to_hwirq(d);
 }
 
-static void aic_fiq_set_mask(struct irq_data *d)
+static void fiq_set_mask(struct irq_data *d)
 {
 	/* Only the guest timers have real mask bits, unfortunately. */
-	switch (aic_fiq_get_idx(d)) {
-	case AIC_TMR_EL02_PHYS:
+	switch (fiq_get_idx(d)) {
+	case TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, VM_TMR_FIQ_ENABLE_P, 0);
 		isb();
 		break;
-	case AIC_TMR_EL02_VIRT:
+	case TMR_EL02_VIRT:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, VM_TMR_FIQ_ENABLE_V, 0);
 		isb();
 		break;
@@ -170,14 +146,14 @@ static void aic_fiq_set_mask(struct irq_data *d)
 	}
 }
 
-static void aic_fiq_clear_mask(struct irq_data *d)
+static void fiq_clear_mask(struct irq_data *d)
 {
-	switch (aic_fiq_get_idx(d)) {
-	case AIC_TMR_EL02_PHYS:
+	switch (fiq_get_idx(d)) {
+	case TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_P);
 		isb();
 		break;
-	case AIC_TMR_EL02_VIRT:
+	case TMR_EL02_VIRT:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_V);
 		isb();
 		break;
@@ -186,22 +162,22 @@ static void aic_fiq_clear_mask(struct irq_data *d)
 	}
 }
 
-static void aic_fiq_mask(struct irq_data *d)
+static void fiq_mask(struct irq_data *d)
 {
-	aic_fiq_set_mask(d);
+	fiq_set_mask(d);
 	__this_cpu_and(aic_fiq_unmasked, ~BIT(aic_fiq_get_idx(d)));
 }
 
 static void aic_fiq_unmask(struct irq_data *d)
 {
-	aic_fiq_clear_mask(d);
+	fiq_clear_mask(d);
 	__this_cpu_or(aic_fiq_unmasked, BIT(aic_fiq_get_idx(d)));
 }
 
-static void aic_fiq_eoi(struct irq_data *d)
+static void fiq_eoi(struct irq_data *d)
 {
 	/* We mask to ack (where we can), so we need to unmask at EOI. */
-	if (__this_cpu_read(aic_fiq_unmasked) & BIT(aic_fiq_get_idx(d)))
+	if (__this_cpu_read(fiq_unmasked) & BIT(aic_fiq_get_idx(d)))
 		aic_fiq_clear_mask(d);
 }
 
@@ -210,7 +186,7 @@ static void aic_fiq_eoi(struct irq_data *d)
 		 ARCH_TIMER_CTRL_IT_STAT)) ==                                  \
 	 (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_STAT))
 
-static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
+static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 {
 	/*
 	 * It would be really nice if we had a system register that lets us get
@@ -233,25 +209,21 @@ static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
 	}
 
 	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
-		handle_domain_irq(aic_irqc->hw_domain,
-				  aic_irqc->nr_hw + AIC_TMR_EL0_PHYS, regs);
+		handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL0_PHYS, regs);
 
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
-		handle_domain_irq(aic_irqc->hw_domain,
-				  aic_irqc->nr_hw + AIC_TMR_EL0_VIRT, regs);
+		handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL0_VIRT, regs);
 
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTP_CTL_EL02)))
-			handle_domain_irq(aic_irqc->hw_domain,
-					  aic_irqc->nr_hw + AIC_TMR_EL02_PHYS, regs);
+			handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL02_PHYS, regs);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTV_CTL_EL02)))
-			handle_domain_irq(aic_irqc->hw_domain,
-					  aic_irqc->nr_hw + AIC_TMR_EL02_VIRT, regs);
+			handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL02_VIRT, regs);
 	}
 
 	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
@@ -275,43 +247,37 @@ static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
 	}
 }
 
-static int aic_fiq_set_type(struct irq_data *d, unsigned int type)
+static int fiq_set_type(struct irq_data *d, unsigned int type)
 {
 	return (type == IRQ_TYPE_LEVEL_HIGH) ? 0 : -EINVAL;
 }
 
 static struct irq_chip fiq_chip = {
 	.name = "AIC-FIQ",
-	.irq_mask = aic_fiq_mask,
-	.irq_unmask = aic_fiq_unmask,
-	.irq_ack = aic_fiq_set_mask,
-	.irq_eoi = aic_fiq_eoi,
-	.irq_set_type = aic_fiq_set_type,
+	.irq_mask = fiq_mask,
+	.irq_unmask = fiq_unmask,
+	.irq_ack = fiq_set_mask,
+	.irq_eoi = fiq_eoi,
+	.irq_set_type = fiq_set_type,
 };
 
 /*
  * Main IRQ domain
  */
 
-static int aic_irq_domain_map(struct irq_domain *id, unsigned int irq,
+static int irq_domain_map(struct irq_domain *id, unsigned int irq,
 			      irq_hw_number_t hw)
 {
 	struct aic_irq_chip *ic = id->host_data;
 
-	if (hw < ic->nr_hw) {
-		irq_domain_set_info(id, irq, hw, &aic_chip, id->host_data,
-				    handle_fasteoi_irq, NULL, NULL);
-		irqd_set_single_target(irq_desc_get_irq_data(irq_to_desc(irq)));
-	} else {
-		irq_set_percpu_devid(irq);
-		irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
-				    handle_percpu_devid_irq, NULL, NULL);
-	}
+	irq_set_percpu_devid(irq);
+	irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
+			    handle_percpu_devid_irq, NULL, NULL);
 
 	return 0;
 }
 
-static int aic_irq_domain_translate(struct irq_domain *id,
+static int irq_domain_translate(struct irq_domain *id,
 				    struct irq_fwspec *fwspec,
 				    unsigned long *hwirq,
 				    unsigned int *type)
@@ -323,7 +289,7 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 
 	switch (fwspec->param[0]) {
 	case AIC_FIQ:
-		if (fwspec->param[1] >= AIC_NR_FIQ)
+		if (fwspec->param[1] >= NR_FIQ)
 			return -EINVAL;
 		*hwirq = ic->nr_hw + fwspec->param[1];
 
@@ -333,14 +299,14 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 		 */
 		if (!is_kernel_in_hyp_mode()) {
 			switch (fwspec->param[1]) {
-			case AIC_TMR_GUEST_PHYS:
-				*hwirq = ic->nr_hw + AIC_TMR_EL0_PHYS;
+			case TMR_GUEST_PHYS:
+				*hwirq = ic->nr_hw + TMR_EL0_PHYS;
 				break;
-			case AIC_TMR_GUEST_VIRT:
-				*hwirq = ic->nr_hw + AIC_TMR_EL0_VIRT;
+			case TMR_GUEST_VIRT:
+				*hwirq = ic->nr_hw + TMR_EL0_VIRT;
 				break;
-			case AIC_TMR_HV_PHYS:
-			case AIC_TMR_HV_VIRT:
+			case TMR_HV_PHYS:
+			case TMR_HV_VIRT:
 				return -ENOENT;
 			default:
 				break;
@@ -356,7 +322,7 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 	return 0;
 }
 
-static int aic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
+static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 				unsigned int nr_irqs, void *arg)
 {
 	unsigned int type = IRQ_TYPE_NONE;
@@ -364,12 +330,12 @@ static int aic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 	irq_hw_number_t hwirq;
 	int i, ret;
 
-	ret = aic_irq_domain_translate(domain, fwspec, &hwirq, &type);
+	ret = irq_domain_translate(domain, fwspec, &hwirq, &type);
 	if (ret)
 		return ret;
 
 	for (i = 0; i < nr_irqs; i++) {
-		ret = aic_irq_domain_map(domain, virq + i, hwirq + i);
+		ret = irq_domain_map(domain, virq + i, hwirq + i);
 		if (ret)
 			return ret;
 	}
@@ -377,7 +343,7 @@ static int aic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 	return 0;
 }
 
-static void aic_irq_domain_free(struct irq_domain *domain, unsigned int virq,
+static void irq_domain_free(struct irq_domain *domain, unsigned int virq,
 				unsigned int nr_irqs)
 {
 	int i;
@@ -390,39 +356,11 @@ static void aic_irq_domain_free(struct irq_domain *domain, unsigned int virq,
 	}
 }
 
-static const struct irq_domain_ops aic_irq_domain_ops = {
-	.translate	= aic_irq_domain_translate,
-	.alloc		= aic_irq_domain_alloc,
-	.free		= aic_irq_domain_free,
+static const struct irq_domain_ops irq_domain_ops = {
+	.translate	= irq_domain_translate,
+	.alloc		= irq_domain_alloc,
+	.free		= irq_domain_free,
 };
-
-static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
-{
-	struct irq_domain *ipi_domain;
-	int base_ipi;
-
-	ipi_domain = irq_domain_create_linear(irqc->hw_domain->fwnode, AIC_NR_SWIPI,
-					      &aic_ipi_domain_ops, irqc);
-	if (WARN_ON(!ipi_domain))
-		return -ENODEV;
-
-	ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
-	irq_domain_update_bus_token(ipi_domain, DOMAIN_BUS_IPI);
-
-	base_ipi = __irq_domain_alloc_irqs(ipi_domain, -1, AIC_NR_SWIPI,
-					   NUMA_NO_NODE, NULL, false, NULL);
-
-	if (WARN_ON(!base_ipi)) {
-		irq_domain_remove(ipi_domain);
-		return -ENODEV;
-	}
-
-	set_smp_ipi_range(base_ipi, AIC_NR_SWIPI);
-
-	irqc->ipi_domain = ipi_domain;
-
-	return 0;
-}
 
 static int aic_init_cpu(unsigned int cpu)
 {
@@ -440,9 +378,6 @@ static int aic_init_cpu(unsigned int cpu)
 		/* Guest timers */
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2,
 				   VM_TMR_FIQ_ENABLE_V | VM_TMR_FIQ_ENABLE_P, 0);
-
-		/* vGIC maintenance IRQ */
-		sysreg_clear_set_s(SYS_ICH_HCR_EL2, ICH_HCR_EN, 0);
 	}
 
 	/* PMC FIQ */
@@ -456,28 +391,13 @@ static int aic_init_cpu(unsigned int cpu)
 	/* Commit all of the above */
 	isb();
 
-	/*
-	 * Make sure the kernel's idea of logical CPU order is the same as AIC's
-	 * If we ever end up with a mismatch here, we will have to introduce
-	 * a mapping table similar to what other irqchip drivers do.
-	 */
-	WARN_ON(aic_ic_read(aic_irqc, AIC_WHOAMI) != smp_processor_id());
-
-	/*
-	 * Always keep IPIs unmasked at the hardware level (except auto-masking
-	 * by AIC during processing). We manage masks at the vIPI level.
-	 */
-	aic_ic_write(aic_irqc, AIC_IPI_ACK, AIC_IPI_SELF | AIC_IPI_OTHER);
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_SET, AIC_IPI_SELF);
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
-
 	/* Initialize the local mask state */
-	__this_cpu_write(aic_fiq_unmasked, 0);
+	__this_cpu_write(fiq_unmasked, 0);
 
 	return 0;
 }
 
-static int __init aic_of_ic_init(struct device_node *node, struct device_node *parent)
+static int __init fiq_of_ic_init(struct device_node *node, struct device_node *parent)
 {
 	int i;
 	void __iomem *regs;
@@ -495,12 +415,9 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	aic_irqc = irqc;
 	irqc->base = regs;
 
-	info = aic_ic_read(irqc, AIC_INFO);
-	irqc->nr_hw = FIELD_GET(AIC_INFO_NR_HW, info);
-
 	irqc->hw_domain = irq_domain_create_linear(of_node_to_fwnode(node),
-						   irqc->nr_hw + AIC_NR_FIQ,
-						   &aic_irq_domain_ops, irqc);
+						   AIC_NR_FIQ,
+						   &irq_domain_ops, irqc);
 	if (WARN_ON(!irqc->hw_domain)) {
 		iounmap(irqc->base);
 		kfree(irqc);
@@ -509,33 +426,14 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 
 	irq_domain_update_bus_token(irqc->hw_domain, DOMAIN_BUS_WIRED);
 
-	if (aic_init_smp(irqc, node)) {
-		irq_domain_remove(irqc->hw_domain);
-		iounmap(irqc->base);
-		kfree(irqc);
-		return -ENODEV;
-	}
-
 	set_handle_fiq(aic_handle_fiq);
-
-	for (i = 0; i < BITS_TO_U32(irqc->nr_hw); i++)
-		aic_ic_write(irqc, AIC_MASK_SET + i * 4, U32_MAX);
-	for (i = 0; i < BITS_TO_U32(irqc->nr_hw); i++)
-		aic_ic_write(irqc, AIC_SW_CLR + i * 4, U32_MAX);
-	for (i = 0; i < irqc->nr_hw; i++)
-		aic_ic_write(irqc, AIC_TARGET_CPU + i * 4, 1);
 
 	if (!is_kernel_in_hyp_mode())
 		pr_info("Kernel running in EL1, mapping interrupts");
 
-	cpuhp_setup_state(CPUHP_AP_IRQ_APPLE_AIC_STARTING,
-			  "irqchip/apple-aic/ipi:starting",
-			  aic_init_cpu, NULL);
-
-	pr_info("Initialized with %d IRQs, %d FIQs, %d vIPIs\n",
-		irqc->nr_hw, AIC_NR_FIQ, AIC_NR_SWIPI);
+	pr_info("Initialized with %d FIQs\n", AIC_NR_FIQ);
 
 	return 0;
 }
 
-IRQCHIP_DECLARE(apple_m1_aic, "apple,aic", aic_of_ic_init);
+IRQCHIP_DECLARE(apple_m1_fiq, "apple,fiq", fiq_of_ic_init);
