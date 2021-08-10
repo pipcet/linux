@@ -8,8 +8,6 @@
  *   Copyright 2015 Broadcom
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/bits.h>
 #include <linux/bitfield.h>
 #include <linux/cpuhotplug.h>
