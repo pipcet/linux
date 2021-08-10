@@ -136,7 +136,7 @@ static void aic_irq_unmask(struct irq_data *d)
 {
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
 
-	aic_ic_write(ic, AIC_MASK_CLR + MASK_REG(d->hwirq),
+	aic_ic_write(ic, AIC_MASK_CLR + MASK_REG(irqd_to_hwirq(d)),
 		     MASK_BIT(irqd_to_hwirq(d)));
 }
 
@@ -228,8 +228,6 @@ static struct irq_chip aic_chip = {
 static int aic_irq_domain_map(struct irq_domain *id, unsigned int irq,
 			      irq_hw_number_t hw)
 {
-	struct aic_irq_chip *ic = id->host_data;
-
 	irq_domain_set_info(id, irq, hw, &aic_chip, id->host_data,
 			    handle_fasteoi_irq, NULL, NULL);
 	irqd_set_single_target(irq_desc_get_irq_data(irq_to_desc(irq)));

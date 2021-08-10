@@ -182,7 +182,7 @@ static void fiq_eoi(struct irq_data *d)
 		 ARCH_TIMER_CTRL_IT_STAT)) ==                                  \
 	 (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_STAT))
 
-static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
+void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 {
 	/*
 	 * It would be really nice if we had a system register that lets us get
@@ -405,8 +405,6 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 		kfree(irqc);
 		return -ENODEV;
 	}
-
-	irq_domain_update_bus_token(irqc->domain, DOMAIN_BUS_WIRED);
 
 	set_handle_fiq(handle_fiq);
 
