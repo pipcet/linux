@@ -354,7 +354,7 @@ static const struct irq_domain_ops irq_domain_ops = {
 	.free		= irq_domain_free,
 };
 
-static int fiq_init_cpu(unsigned int cpu)
+int fiq_init_cpu(unsigned int cpu)
 {
 	/* Mask all hard-wired per-CPU IRQ/FIQ sources */
 
