@@ -9,6 +9,8 @@
 
 /dts-v1/;
 
+#include <dt-bindings/leds/common.h>
+
 #include "t8103.dtsi"
 
 / {
@@ -20,7 +22,7 @@
 	};
 
 	soc {
-		pwm@235044000 {
+		fpwm0: pwm@235044000 {
 			compatible = "apple,t8103-fpwm";
 			reg = <0x2 0x35044000 0x0 0x4000>;
 			clocks = <&clk24>;
@@ -40,6 +42,18 @@
 			reg = <0 0 0 0>; /* To be filled by loader */
 			/* Format properties will be added by loader */
 			status = "disabled";
+		};
+	};
+
+	leds {
+		compatible = "pwm-leds";
+
+		kbd-backlight {
+			label = "kbd_backlight";
+			function = LED_FUNCTION_KBD_BACKLIGHT;
+			color = <LED_COLOR_ID_WHITE>;
+			pwms = <&fpwm0 1000000>;
+			max-brightness = <255>;
 		};
 	};
 
