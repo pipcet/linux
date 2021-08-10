@@ -118,15 +118,10 @@ static struct fiq_irq_chip *fiq_irqc;
  * FIQ irqchip
  */
 
-static unsigned long fiq_get_idx(struct irq_data *d)
-{
-	return irqd_to_hwirq(d);
-}
-
 static void fiq_set_mask(struct irq_data *d)
 {
 	/* Only the guest timers have real mask bits, unfortunately. */
-	switch (fiq_get_idx(d)) {
+	switch (irqd_to_hwirq(d)) {
 	case TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, VM_TMR_FIQ_ENABLE_P, 0);
 		isb();
@@ -142,7 +137,7 @@ static void fiq_set_mask(struct irq_data *d)
 
 static void fiq_clear_mask(struct irq_data *d)
 {
-	switch (fiq_get_idx(d)) {
+	switch (irqd_to_hwirq(d)) {
 	case TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_P);
 		isb();
@@ -159,19 +154,19 @@ static void fiq_clear_mask(struct irq_data *d)
 static void fiq_mask(struct irq_data *d)
 {
 	fiq_set_mask(d);
-	__this_cpu_and(fiq_unmasked, ~BIT(fiq_get_idx(d)));
+	__this_cpu_and(fiq_unmasked, ~BIT(irqd_to_hwirq(d)));
 }
 
 static void fiq_unmask(struct irq_data *d)
 {
 	fiq_clear_mask(d);
-	__this_cpu_or(fiq_unmasked, BIT(fiq_get_idx(d)));
+	__this_cpu_or(fiq_unmasked, BIT(irqd_to_hwirq(d)));
 }
 
 static void fiq_eoi(struct irq_data *d)
 {
 	/* We mask to ack (where we can), so we need to unmask at EOI. */
-	if (__this_cpu_read(fiq_unmasked) & BIT(fiq_get_idx(d)))
+	if (__this_cpu_read(fiq_unmasked) & BIT(irqd_to_hwirq(d)))
 		fiq_clear_mask(d);
 }
 
@@ -247,7 +242,7 @@ static int fiq_set_type(struct irq_data *d, unsigned int type)
 }
 
 static struct irq_chip fiq_chip = {
-	.name = "AIC-FIQ",
+	.name = "FIQ",
 	.irq_mask = fiq_mask,
 	.irq_unmask = fiq_unmask,
 	.irq_ack = fiq_set_mask,
