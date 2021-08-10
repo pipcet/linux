@@ -284,6 +284,7 @@ static int apple_spimc_transfer_one_message(struct spi_controller *master, struc
 		if(status)
 			break;
 
+                ndelay(spi_delay_to_ns(&t->delay, t));
 		spi_delay_exec(&t->delay, t);
 
 		if(t->cs_change) {

@@ -226,6 +226,7 @@
 		    gpio-controller;
 		    #gpio-cells = <2>;
 
+                    interrupt-parent = <&aic>;
 		    interrupt-controller;
 		    #interrupt-cells = <2>;
 
@@ -262,6 +263,7 @@
 		    gpio-controller;
 		    #gpio-cells = <2>;
 
+                    interrupt-parent = <&aic>;
 		    interrupt-controller;
 		    #interrupt-cells = <2>;
 		};
@@ -286,7 +288,8 @@
 		    compatible = "apple,spi-mc-m1";
 		    reg = <0x2 0x3510c000 0x0 0x4000>;
 		    interrupts = <0 617 4>;
-		    clocks = <&spi3_clk>;
+		    //clocks = <&spi3_clk>;
+                    clocks = <&refclk24mhz>;
 		    cs-gpios = <&gpio 49 0>;
 		    #address-cells = <1>;
 		    #size-cells = <0>;
@@ -297,7 +300,8 @@
 			spi-max-frequency = <2000000>;
 			spien-gpios = <&gpio 195 0>;
 			irq-gpios = <&nub_gpio 13 0>;
-			interrupt-parent = <&nub_gpio>;
+			//interrupt-parent = <&nub_gpio>;
+                        interrupt-parent = <&aic>;
 			interrupts = <13 8>;
 		    };
 		};
