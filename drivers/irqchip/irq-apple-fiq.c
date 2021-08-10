@@ -411,6 +411,10 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 	if (!is_kernel_in_hyp_mode())
 		pr_info("Kernel running in EL1, mapping interrupts");
 
+	cpuhp_setup_state(CPUHP_AP_IRQ_APPLE_FIQ_STARTING,
+			  "irqchip/apple-fiq/fiq:starting",
+			  fiq_init_cpu, NULL);
+
 	pr_info("Initialized with %d FIQs\n", NR_FIQ);
 
 	return 0;
