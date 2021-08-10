@@ -38,6 +38,8 @@
 #include <asm/sysreg.h>
 #include <asm/virt.h>
 
+#include <dt-bindings/interrupt-controller/apple-aic.h>
+
 /*
  * IMP-DEF sysregs that control FIQ sources
  * Note: sysreg-based IPIs are not supported yet.
@@ -100,6 +102,11 @@
  * running at EL2 (with VHE). When the kernel is running at EL1, the
  * mapping differs and irq_domain_translate() performs the remapping.
  */
+
+#define TMR_HV_PHYS AIC_TMR_HV_PHYS
+#define TMR_HV_VIRT AIC_TMR_HV_VIRT
+#define TMR_GUEST_PHYS AIC_TMR_GUEST_PHYS
+#define TMR_GUEST_VIRT AIC_TMR_GUEST_VIRT
 
 #define TMR_EL0_PHYS	TMR_HV_PHYS
 #define TMR_EL0_VIRT	TMR_HV_VIRT
@@ -257,8 +264,6 @@ static struct irq_chip fiq_chip = {
 static int irq_domain_map(struct irq_domain *id, unsigned int irq,
 			      irq_hw_number_t hw)
 {
-	struct fiq_irq_chip *ic = id->host_data;
-
 	irq_set_percpu_devid(irq);
 	irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
 			    handle_percpu_devid_irq, NULL, NULL);
@@ -271,8 +276,6 @@ static int irq_domain_translate(struct irq_domain *id,
 				    unsigned long *hwirq,
 				    unsigned int *type)
 {
-	struct fiq_irq_chip *ic = id->host_data;
-
 	if (fwspec->param_count != 3 || !is_of_node(fwspec->fwnode))
 		return -EINVAL;
 
@@ -388,14 +391,7 @@ static int fiq_init_cpu(unsigned int cpu)
 
 static int __init fiq_of_ic_init(struct device_node *node, struct device_node *parent)
 {
-	int i;
-	void __iomem *regs;
-	u32 info;
 	struct fiq_irq_chip *irqc;
-
-	regs = of_iomap(node, 0);
-	if (WARN_ON(!regs))
-		return -EIO;
 
 	irqc = kzalloc(sizeof(*irqc), GFP_KERNEL);
 	if (!irqc)
@@ -406,7 +402,6 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 	irqc->domain = irq_domain_create_linear(of_node_to_fwnode(node),
 						   NR_FIQ, &irq_domain_ops, irqc);
 	if (WARN_ON(!irqc->domain)) {
-		iounmap(irqc->base);
 		kfree(irqc);
 		return -ENODEV;
 	}
