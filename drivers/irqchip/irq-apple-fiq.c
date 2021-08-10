@@ -107,11 +107,7 @@
 #define TMR_EL02_VIRT	TMR_GUEST_VIRT
 
 struct aic_irq_chip {
-	void __iomem *base;
-	struct irq_domain *hw_domain;
-	struct irq_domain *ipi_domain;
-	int nr_hw;
-	int ipi_hwirq;
+	struct irq_domain *fiq_domain;
 };
 
 static DEFINE_PER_CPU(uint32_t, aic_fiq_unmasked);
@@ -209,21 +205,21 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 	}
 
 	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
-		handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL0_PHYS, regs);
+		handle_domain_irq(aic_irqc->domain, AIC_TMR_EL0_PHYS, regs);
 
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
-		handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL0_VIRT, regs);
+		handle_domain_irq(aic_irqc->domain, AIC_TMR_EL0_VIRT, regs);
 
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTP_CTL_EL02)))
-			handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL02_PHYS, regs);
+			handle_domain_irq(aic_irqc->domain, AIC_TMR_EL02_PHYS, regs);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTV_CTL_EL02)))
-			handle_domain_irq(aic_irqc->hw_domain, AIC_TMR_EL02_VIRT, regs);
+			handle_domain_irq(aic_irqc->domain, AIC_TMR_EL02_VIRT, regs);
 	}
 
 	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
@@ -291,7 +287,7 @@ static int irq_domain_translate(struct irq_domain *id,
 	case AIC_FIQ:
 		if (fwspec->param[1] >= NR_FIQ)
 			return -EINVAL;
-		*hwirq = ic->nr_hw + fwspec->param[1];
+		*hwirq = fwspec->param[1];
 
 		/*
 		 * In EL1 the non-redirected registers are the guest's,
@@ -300,10 +296,10 @@ static int irq_domain_translate(struct irq_domain *id,
 		if (!is_kernel_in_hyp_mode()) {
 			switch (fwspec->param[1]) {
 			case TMR_GUEST_PHYS:
-				*hwirq = ic->nr_hw + TMR_EL0_PHYS;
+				*hwirq = TMR_EL0_PHYS;
 				break;
 			case TMR_GUEST_VIRT:
-				*hwirq = ic->nr_hw + TMR_EL0_VIRT;
+				*hwirq = TMR_EL0_VIRT;
 				break;
 			case TMR_HV_PHYS:
 			case TMR_HV_VIRT:
@@ -415,23 +411,22 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 	aic_irqc = irqc;
 	irqc->base = regs;
 
-	irqc->hw_domain = irq_domain_create_linear(of_node_to_fwnode(node),
-						   AIC_NR_FIQ,
-						   &irq_domain_ops, irqc);
-	if (WARN_ON(!irqc->hw_domain)) {
+	irqc->domain = irq_domain_create_linear(of_node_to_fwnode(node),
+						   NR_FIQ, &irq_domain_ops, irqc);
+	if (WARN_ON(!irqc->domain)) {
 		iounmap(irqc->base);
 		kfree(irqc);
 		return -ENODEV;
 	}
 
-	irq_domain_update_bus_token(irqc->hw_domain, DOMAIN_BUS_WIRED);
+	irq_domain_update_bus_token(irqc->domain, DOMAIN_BUS_WIRED);
 
-	set_handle_fiq(aic_handle_fiq);
+	set_handle_fiq(handle_fiq);
 
 	if (!is_kernel_in_hyp_mode())
 		pr_info("Kernel running in EL1, mapping interrupts");
 
-	pr_info("Initialized with %d FIQs\n", AIC_NR_FIQ);
+	pr_info("Initialized with %d FIQs\n", NR_FIQ);
 
 	return 0;
 }
