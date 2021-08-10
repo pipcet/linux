@@ -560,9 +560,6 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	for (i = 0; i < irqc->nr_hw; i++)
 		aic_ic_write(irqc, AIC_TARGET_CPU + i * 4, 1);
 
-	if (!is_kernel_in_hyp_mode())
-		pr_info("Kernel running in EL1, mapping interrupts");
-
 	cpuhp_setup_state(CPUHP_AP_IRQ_APPLE_AIC_STARTING,
 			  "irqchip/apple-aic/ipi:starting",
 			  aic_init_cpu, NULL);
