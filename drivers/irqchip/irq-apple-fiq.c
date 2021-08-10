@@ -98,7 +98,7 @@
  * or _EL02 registers. In the DT binding, the timers are represented
  * by their purpose (HV or guest). This mapping is for when the kernel is
  * running at EL2 (with VHE). When the kernel is running at EL1, the
- * mapping differs and aic_irq_domain_translate() performs the remapping.
+ * mapping differs and irq_domain_translate() performs the remapping.
  */
 
 #define TMR_EL0_PHYS	TMR_HV_PHYS
@@ -106,13 +106,13 @@
 #define TMR_EL02_PHYS	TMR_GUEST_PHYS
 #define TMR_EL02_VIRT	TMR_GUEST_VIRT
 
-struct aic_irq_chip {
-	struct irq_domain *fiq_domain;
+struct fiq_irq_chip {
+	struct irq_domain *domain;
 };
 
-static DEFINE_PER_CPU(uint32_t, aic_fiq_unmasked);
+static DEFINE_PER_CPU(uint32_t, fiq_unmasked);
 
-static struct aic_irq_chip *aic_irqc;
+static struct fiq_irq_chip *fiq_irqc;
 
 /*
  * FIQ irqchip
@@ -120,8 +120,6 @@ static struct aic_irq_chip *aic_irqc;
 
 static unsigned long fiq_get_idx(struct irq_data *d)
 {
-	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
-
 	return irqd_to_hwirq(d);
 }
 
@@ -161,20 +159,20 @@ static void fiq_clear_mask(struct irq_data *d)
 static void fiq_mask(struct irq_data *d)
 {
 	fiq_set_mask(d);
-	__this_cpu_and(aic_fiq_unmasked, ~BIT(aic_fiq_get_idx(d)));
+	__this_cpu_and(fiq_unmasked, ~BIT(fiq_get_idx(d)));
 }
 
-static void aic_fiq_unmask(struct irq_data *d)
+static void fiq_unmask(struct irq_data *d)
 {
 	fiq_clear_mask(d);
-	__this_cpu_or(aic_fiq_unmasked, BIT(aic_fiq_get_idx(d)));
+	__this_cpu_or(fiq_unmasked, BIT(fiq_get_idx(d)));
 }
 
 static void fiq_eoi(struct irq_data *d)
 {
 	/* We mask to ack (where we can), so we need to unmask at EOI. */
-	if (__this_cpu_read(fiq_unmasked) & BIT(aic_fiq_get_idx(d)))
-		aic_fiq_clear_mask(d);
+	if (__this_cpu_read(fiq_unmasked) & BIT(fiq_get_idx(d)))
+		fiq_clear_mask(d);
 }
 
 #define TIMER_FIRING(x)                                                        \
@@ -205,21 +203,21 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 	}
 
 	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
-		handle_domain_irq(aic_irqc->domain, AIC_TMR_EL0_PHYS, regs);
+		handle_domain_irq(fiq_irqc->domain, TMR_EL0_PHYS, regs);
 
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
-		handle_domain_irq(aic_irqc->domain, AIC_TMR_EL0_VIRT, regs);
+		handle_domain_irq(fiq_irqc->domain, TMR_EL0_VIRT, regs);
 
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTP_CTL_EL02)))
-			handle_domain_irq(aic_irqc->domain, AIC_TMR_EL02_PHYS, regs);
+			handle_domain_irq(fiq_irqc->domain, TMR_EL02_PHYS, regs);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTV_CTL_EL02)))
-			handle_domain_irq(aic_irqc->domain, AIC_TMR_EL02_VIRT, regs);
+			handle_domain_irq(fiq_irqc->domain, TMR_EL02_VIRT, regs);
 	}
 
 	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
@@ -264,7 +262,7 @@ static struct irq_chip fiq_chip = {
 static int irq_domain_map(struct irq_domain *id, unsigned int irq,
 			      irq_hw_number_t hw)
 {
-	struct aic_irq_chip *ic = id->host_data;
+	struct fiq_irq_chip *ic = id->host_data;
 
 	irq_set_percpu_devid(irq);
 	irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
@@ -278,7 +276,7 @@ static int irq_domain_translate(struct irq_domain *id,
 				    unsigned long *hwirq,
 				    unsigned int *type)
 {
-	struct aic_irq_chip *ic = id->host_data;
+	struct fiq_irq_chip *ic = id->host_data;
 
 	if (fwspec->param_count != 3 || !is_of_node(fwspec->fwnode))
 		return -EINVAL;
@@ -358,7 +356,7 @@ static const struct irq_domain_ops irq_domain_ops = {
 	.free		= irq_domain_free,
 };
 
-static int aic_init_cpu(unsigned int cpu)
+static int fiq_init_cpu(unsigned int cpu)
 {
 	/* Mask all hard-wired per-CPU IRQ/FIQ sources */
 
@@ -398,7 +396,7 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 	int i;
 	void __iomem *regs;
 	u32 info;
-	struct aic_irq_chip *irqc;
+	struct fiq_irq_chip *irqc;
 
 	regs = of_iomap(node, 0);
 	if (WARN_ON(!regs))
@@ -408,8 +406,7 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 	if (!irqc)
 		return -ENOMEM;
 
-	aic_irqc = irqc;
-	irqc->base = regs;
+	fiq_irqc = irqc;
 
 	irqc->domain = irq_domain_create_linear(of_node_to_fwnode(node),
 						   NR_FIQ, &irq_domain_ops, irqc);
