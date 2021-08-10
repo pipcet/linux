@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: GPL-2.0+ OR MIT
+/*
+ * Apple MacBook Pro (13-inch, M1, 2020)
+ *
+ * target-type: J293
+ *
+ * Copyright The Asahi Linux Contributors
+ */
+
+/dts-v1/;
+
+#include "t8103.dtsi"
+
+/ {
+	compatible = "apple,j293", "apple,t8103", "apple,arm-platform";
+	model = "Apple MacBook Pro (13-inch, M1, 2020)";
+
+	aliases {
+		serial0 = &serial0;
+	};
+
+	soc {
+		pwm@235044000 {
+			compatible = "apple,t8103-fpwm";
+			reg = <0x2 0x35044000 0x0 0x4000>;
+			clocks = <&clk24>;
+			#pwm-cells = <0>;
+		};
+	};
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		stdout-path = "serial0";
+
+		framebuffer0: framebuffer@0 {
+			compatible = "apple,simple-framebuffer", "simple-framebuffer";
+			reg = <0 0 0 0>; /* To be filled by loader */
+			/* Format properties will be added by loader */
+			status = "disabled";
+		};
+	};
+
+	memory@800000000 {
+		device_type = "memory";
+		reg = <0x8 0 0x2 0>; /* To be filled by loader */
+	};
+};
+
+&serial0 {
+	status = "okay";
+};
