@@ -188,14 +188,13 @@ static int aic_irq_set_affinity(struct irq_data *d,
 	irq_hw_number_t hwirq = irqd_to_hwirq(d);
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
 	int cpu;
+	u32 mask = 0;
 
-	if (force)
-		cpu = cpumask_first(mask_val);
-	else
-		cpu = cpumask_any_and(mask_val, cpu_online_mask);
+	for_each_cpu(cpu, mask_val)
+		mask |= BIT(cpu);
 
-	aic_ic_write(ic, AIC_TARGET_CPU + hwirq * 4, BIT(cpu));
-	irq_data_update_effective_affinity(d, cpumask_of(cpu));
+	aic_ic_write(ic, AIC_TARGET_CPU + hwirq * 4, mask);
+	irq_data_update_effective_affinity(d, mask_val);
 
 	return IRQ_SET_MASK_OK;
 }
