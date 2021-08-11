@@ -314,6 +314,9 @@ config ARCH_MHP_MEMMAP_ON_MEMORY_ENABLE
 config SMP
 	def_bool y
 
+config IPI_FUNNELING
+        def_bool y
+
 config KERNEL_MODE_NEON
 	def_bool y
 

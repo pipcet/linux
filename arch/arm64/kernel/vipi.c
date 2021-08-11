@@ -21,6 +21,19 @@
 #include <asm/sysreg.h>
 #include <asm/virt.h>
 
+struct vipi_irq_chip {
+	struct irq_domain *domain;
+	struct irq_data *hwirq;
+};
+
+#define NR_SWIPI 32
+
+static DEFINE_PER_CPU(atomic_t, vipi_flag);
+static DEFINE_PER_CPU(atomic_t, vipi_enable);
+
+static struct vipi_irq_chip *vipi_irqc;
+
+static void handle_ipi(struct irq_desc *d);
 /*
  * IPI irqchip
  */
@@ -83,8 +96,10 @@ static void vipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 		smp_mb__after_atomic();
 
 		if (!(pending & irq_bit) &&
-		    (atomic_read(per_cpu_ptr(&aic_vipi_enable, cpu)) & irq_bit))
-			send |= AIC_IPI_SEND_CPU(cpu);
+		    (atomic_read(per_cpu_ptr(&vipi_enable, cpu)) & irq_bit)) {
+			cpumask_set_cpu(cpu, &sendmask);
+			send = true;
+		}
 	}
 
 	/*
@@ -94,7 +109,7 @@ static void vipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 	 * already ordered after the vIPI flag write.
 	 */
 	if (send)
-		aic_ic_write(ic, AIC_IPI_SEND, send);
+		ipi_send_mask(ic->hwirq->irq, &sendmask);
 }
 
 static struct irq_chip vipi_chip = {
@@ -132,9 +147,12 @@ static void handle_ipi(struct irq_desc *d)
 	 */
 	firing = atomic_fetch_andnot(enabled, this_cpu_ptr(&vipi_flag)) & enabled;
 
-	for_each_set_bit(i, &firing, AIC_NR_SWIPI)
-		handle_domain_irq(aic_irqc->ipi_domain, i, regs);
+	for_each_set_bit(i, &firing, NR_SWIPI) {
+		struct irq_desc *nd =
+			irq_resolve_mapping(vipi_irqc->domain, i);
 
+		handle_irq_desc(nd);
+	}
 }
 
 static int vipi_alloc(struct irq_domain *d, unsigned int virq,
@@ -154,6 +172,7 @@ static int vipi_alloc(struct irq_domain *d, unsigned int virq,
 static void vipi_free(struct irq_domain *d, unsigned int virq, unsigned int nr_irqs)
 {
 	/* Not freeing IPIs */
+	WARN_ON(1);
 }
 
 static const struct irq_domain_ops vipi_domain_ops = {
@@ -165,8 +184,12 @@ static int vipi_init_smp(struct vipi_irq_chip *irqc)
 {
 	struct irq_domain *vipi_domain;
 	int base_ipi;
+	struct fwnode_handle *fwnode;
 
-	ipi_domain = irq_domain_create_linear(irqc->hw_domain->fwnode, AIC_NR_SWIPI,
+	fwnode = __irq_domain_alloc_fwnode(IRQCHIP_FWNODE_NAMED, 0,
+					   "vIPI", NULL);
+
+	vipi_domain = irq_domain_create_linear(fwnode, NR_SWIPI,
 					      &vipi_domain_ops, irqc);
 	if (WARN_ON(!vipi_domain))
 		return -ENOMEM;
@@ -179,7 +202,7 @@ static int vipi_init_smp(struct vipi_irq_chip *irqc)
 
 	if (WARN_ON(base_ipi < 0)) {
 		irq_domain_remove(vipi_domain);
-		return -ENODEV;
+		return -ENOMEM;
 	}
 
 	set_smp_ipi_range(base_ipi, NR_SWIPI);
@@ -189,19 +212,24 @@ static int vipi_init_smp(struct vipi_irq_chip *irqc)
 	return 0;
 }
 
-static int aic_init_cpu(unsigned int cpu)
+int __init vipi_init(struct irq_data *hwirq)
 {
+	struct vipi_irq_chip *irqc;
 
 	irqc = kzalloc(sizeof(*irqc), GFP_KERNEL);
 	if (!irqc)
 		return -ENOMEM;
 
+	irqc->hwirq = hwirq;
 
+	if (vipi_init_smp(irqc))
+		return -ENOMEM;
 
+	vipi_irqc = irqc;
 
+	irq_set_handler_locked(hwirq, handle_ipi);
 
-	pr_info("Initialized with %d IRQs, %d FIQs, %d vIPIs\n",
-		irqc->nr_hw, AIC_NR_FIQ, AIC_NR_SWIPI);
+	pr_info("Initialized with %d vIPIs\n", NR_SWIPI);
 
 	return 0;
 }

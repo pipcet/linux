@@ -979,10 +979,26 @@ static void ipi_teardown(int cpu)
 }
 #endif
 
+#ifdef CONFIG_IPI_FUNNELING
+extern int __init vipi_init(struct irq_data *hwirq);
+#else
+static inline int vipi_init(irqdata)
+{
+	return -EINVAL;
+}
+#endif
+
 void __init set_smp_ipi_range(int ipi_base, int n)
 {
 	int i;
 
+	if (n < NR_IPI) {
+		int ret;
+		BUG_ON(n < 1);
+		ret = vipi_init(irq_get_irq_data(ipi_base));
+		if (ret >= 0)
+			return;
+	}
 	WARN_ON(n < NR_IPI);
 	nr_ipi = min(n, NR_IPI);
 
