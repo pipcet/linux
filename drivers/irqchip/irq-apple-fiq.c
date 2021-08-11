@@ -88,8 +88,8 @@
 #define SYS_IMP_APL_UPMSR_EL1		sys_reg(3, 7, 15, 6, 4)
 #define UPMSR_IACT			BIT(0)
 
-#define AIC_NR_FIQ		4
-#define AIC_NR_SWIPI		32
+#define NR_FIQ			6
+#define FIQ_NR_IPI		1
 
 /*
  * FIQ hwirq index definitions: FIQ sources use the DT binding defines
@@ -98,7 +98,7 @@
  * or _EL02 registers. In the DT binding, the timers are represented
  * by their purpose (HV or guest). This mapping is for when the kernel is
  * running at EL2 (with VHE). When the kernel is running at EL1, the
- * mapping differs and aic_irq_domain_translate() performs the remapping.
+ * mapping differs and irq_domain_translate() performs the remapping.
  */
 
 #define AIC_TMR_EL0_PHYS	AIC_TMR_HV_PHYS
@@ -106,17 +106,18 @@
 #define AIC_TMR_EL02_PHYS	AIC_TMR_GUEST_PHYS
 #define AIC_TMR_EL02_VIRT	AIC_TMR_GUEST_VIRT
 
-static DEFINE_PER_CPU(uint32_t, aic_fiq_unmasked);
 
-static struct aic_irq_chip *aic_irqc;
 
+static DEFINE_PER_CPU(uint32_t, fiq_unmasked);
+
+static struct fiq_irq_chip *fiq_irqc;
 
 /*
  * FIQ irqchip
  */
 
 
-static void aic_fiq_set_mask(struct irq_data *d)
+static void fiq_set_mask(struct irq_data *d)
 {
 	/* Only the guest timers have real mask bits, unfortunately. */
 	switch (aic_fiq_get_idx(d)) {
@@ -133,14 +134,14 @@ static void aic_fiq_set_mask(struct irq_data *d)
 	}
 }
 
-static void aic_fiq_clear_mask(struct irq_data *d)
+static void fiq_clear_mask(struct irq_data *d)
 {
 	switch (aic_fiq_get_idx(d)) {
 	case AIC_TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_P);
 		isb();
 		break;
-	case AIC_TMR_EL02_VIRT:
+	case FIQ_TMR_EL02_VIRT:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_V);
 		isb();
 		break;
@@ -173,7 +174,7 @@ static void aic_fiq_eoi(struct irq_data *d)
 		 ARCH_TIMER_CTRL_IT_STAT)) ==                                  \
 	 (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_STAT))
 
-static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
+static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 {
 	/*
 	 * It would be really nice if we had a system register that lets us get
@@ -238,26 +239,26 @@ static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
 	}
 }
 
-static int aic_fiq_set_type(struct irq_data *d, unsigned int type)
+static int fiq_set_type(struct irq_data *d, unsigned int type)
 {
 	return (type == IRQ_TYPE_LEVEL_HIGH) ? 0 : -EINVAL;
 }
 
 static struct irq_chip fiq_chip = {
-	.name = "AIC-FIQ",
-	.irq_mask = aic_fiq_mask,
-	.irq_unmask = aic_fiq_unmask,
-	.irq_ack = aic_fiq_set_mask,
-	.irq_eoi = aic_fiq_eoi,
-	.irq_set_type = aic_fiq_set_type,
+	.name = "FIQ",
+	.irq_mask = fiq_mask,
+	.irq_unmask = fiq_unmask,
+	.irq_ack = fiq_set_mask,
+	.irq_eoi = fiq_eoi,
+	.irq_set_type = fiq_set_type,
 };
 
 /*
  * Main IRQ domain
  */
 
-static int aic_irq_domain_map(struct irq_domain *id, unsigned int irq,
-			      irq_hw_number_t hw)
+static int irq_domain_map(struct irq_domain *id, unsigned int irq,
+			  irq_hw_number_t hw)
 {
 	struct aic_irq_chip *ic = id->host_data;
 
@@ -274,10 +275,10 @@ static int aic_irq_domain_map(struct irq_domain *id, unsigned int irq,
 	return 0;
 }
 
-static int aic_irq_domain_translate(struct irq_domain *id,
-				    struct irq_fwspec *fwspec,
-				    unsigned long *hwirq,
-				    unsigned int *type)
+static int irq_domain_translate(struct irq_domain *id,
+				struct irq_fwspec *fwspec,
+				unsigned long *hwirq,
+				unsigned int *type)
 {
 	struct aic_irq_chip *ic = id->host_data;
 
@@ -307,8 +308,8 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 			case AIC_TMR_GUEST_VIRT:
 				*hwirq = ic->nr_hw + AIC_TMR_EL0_VIRT;
 				break;
-			case AIC_TMR_HV_PHYS:
-			case AIC_TMR_HV_VIRT:
+			case FIQ_TMR_HV_PHYS:
+			case FIQ_TMR_HV_VIRT:
 				return -ENOENT;
 			default:
 				break;
@@ -324,20 +325,20 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 	return 0;
 }
 
-static int aic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
-				unsigned int nr_irqs, void *arg)
+static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
+			    unsigned int nr_irqs, void *arg)
 {
 	unsigned int type = IRQ_TYPE_NONE;
 	struct irq_fwspec *fwspec = arg;
 	irq_hw_number_t hwirq;
 	int i, ret;
 
-	ret = aic_irq_domain_translate(domain, fwspec, &hwirq, &type);
+	ret = irq_domain_translate(domain, fwspec, &hwirq, &type);
 	if (ret)
 		return ret;
 
 	for (i = 0; i < nr_irqs; i++) {
-		ret = aic_irq_domain_map(domain, virq + i, hwirq + i);
+		ret = irq_domain_map(domain, virq + i, hwirq + i);
 		if (ret)
 			return ret;
 	}
@@ -403,7 +404,7 @@ static const struct irq_domain_ops ipi_domain_ops = {
 	.free		= irq_domain_free,
 };
 
-static int aic_init_cpu(unsigned int cpu)
+static int fiq_init_cpu(unsigned int cpu)
 {
 	/* Mask all hard-wired per-CPU IRQ/FIQ sources */
 
@@ -433,7 +434,7 @@ static int aic_init_cpu(unsigned int cpu)
 	isb();
 
 	/* Initialize the local mask state */
-	__this_cpu_write(aic_fiq_unmasked, 0);
+	__this_cpu_write(fiq_unmasked, 0);
 
 	return 0;
 }
@@ -494,4 +495,4 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	return 0;
 }
 
-IRQCHIP_DECLARE(apple_m1_aic, "apple,aic", aic_of_ic_init);
+IRQCHIP_DECLARE(apple_m1_fiq, "apple,fiq", fiq_of_ic_init);
