@@ -175,6 +175,8 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 	 * for them separately. This should never trigger if KVM is working
 	 * properly, because it will have already taken care of clearing it
 	 * on guest exit before this handler runs.
+	 *
+	 * XXX it would be nice to skip this check.
 	 */
 	if (is_kernel_in_hyp_mode() && (read_sysreg_s(SYS_ICH_HCR_EL2) & ICH_HCR_EN) &&
 		read_sysreg_s(SYS_ICH_MISR_EL2) != 0) {
@@ -504,8 +506,8 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 
 	vgic_set_kvm_info(&vgic_info);
 
-	pr_info("Initialized with %d IRQs, %d FIQs, %d vIPIs\n",
-		irqc->nr_hw, AIC_NR_FIQ, AIC_NR_SWIPI);
+	pr_info("Initialized with %d IRQs, 1 IPI, %sused for IPI\n", irqc->nr_hw,
+		use_for_ipi ? "" : "not ");
 
 	return 0;
 }
