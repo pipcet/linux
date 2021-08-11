@@ -182,5 +182,19 @@
 			dr_mode = "host";
 			iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
 		};
+
+		dcp_dart: iommu@23130c000 {
+			compatible = "apple,t8103-dart";
+			reg = <0x2 0x3130c000 0 0x4000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 0x1bd IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+		};
+
+		dcp: remoteproc@231c00000 {
+		        compatible = "apple,t8103-dcp";
+			reg = <0x2 0x31c00000 0 0x4000>;
+			iommus = <&dcp_dart 15>;
+		};
 	};
 };
