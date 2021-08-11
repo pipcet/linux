@@ -39,12 +39,12 @@
 
 	soc {
 		aic: interrupt-controller@23b100000 {
-		        use-for-ipi;
+		        /* use-for-ipi; */
 		};
 	};
 
 	fiq: interrupt-controller {
-	     	/* use-for-ipi; */
+	     	use-for-ipi;
 	};
 
 	memory@800000000 {
