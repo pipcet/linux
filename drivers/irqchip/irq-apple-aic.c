@@ -216,7 +216,7 @@ static void aic_irq_unmask(struct irq_data *d)
 {
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
 
-	aic_ic_write(ic, AIC_MASK_CLR + MASK_REG(d->hwirq),
+	aic_ic_write(ic, AIC_MASK_CLR + MASK_REG(irqd_to_hwirq(d)),
 		     MASK_BIT(irqd_to_hwirq(d)));
 }
 
@@ -723,7 +723,7 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 	base_ipi = __irq_domain_alloc_irqs(ipi_domain, -1, AIC_NR_SWIPI,
 					   NUMA_NO_NODE, NULL, false, NULL);
 
-	if (WARN_ON(!base_ipi)) {
+	if (WARN_ON(base_ipi < 0)) {
 		irq_domain_remove(ipi_domain);
 		return -ENODEV;
 	}
