@@ -152,28 +152,28 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 	struct aic_irq_chip *ic = aic_irqc;
 	u32 event, type, irq;
 
-	do {
-		/*
-		 * We cannot use a relaxed read here, as reads from DMA buffers
-		 * need to be ordered after the IRQ fires.
-		 */
-		event = readl(ic->base + AIC_EVENT);
-		type = FIELD_GET(AIC_EVENT_TYPE, event);
-		irq = FIELD_GET(AIC_EVENT_NUM, event);
+	/*
+	 * We cannot use a relaxed read here, as reads from DMA buffers
+	 * need to be ordered after the IRQ fires.
+	 */
+	event = readl(ic->base + AIC_EVENT);
+	type = FIELD_GET(AIC_EVENT_TYPE, event);
+	irq = FIELD_GET(AIC_EVENT_NUM, event);
 
-		if (type == AIC_EVENT_TYPE_HW)
-			handle_domain_irq(ic->hw_domain, irq, regs);
-		else if (type == AIC_EVENT_TYPE_IPI && irq == 1)
-			aic_handle_ipi(regs, 0);
-		else if (event != 0)
-			pr_err_ratelimited("Unknown IRQ event %d, %d\n", type, irq);
-	} while (event);
+	if (type == AIC_EVENT_TYPE_HW)
+		handle_domain_irq(ic->hw_domain, irq, regs);
+	else if (type == AIC_EVENT_TYPE_IPI)
+		aic_handle_ipi(irq, regs);
+	else if (event != 0)
+		pr_err_ratelimited("Unknown IRQ event %d, %d\n", type, irq);
 
 	/*
 	 * vGIC maintenance interrupts end up here too, so we need to check
 	 * for them separately. This should never trigger if KVM is working
 	 * properly, because it will have already taken care of clearing it
 	 * on guest exit before this handler runs.
+	 *
+	 * XXX it would be nice to skip this check.
 	 */
 	if (is_kernel_in_hyp_mode() && (read_sysreg_s(SYS_ICH_HCR_EL2) & ICH_HCR_EN) &&
 		read_sysreg_s(SYS_ICH_MISR_EL2) != 0) {
