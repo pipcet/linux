@@ -980,9 +980,12 @@ static void ipi_teardown(int cpu)
 #endif
 
 #ifdef CONFIG_IPI_FUNNELING
-extern int __init ipi_funnel_init(struct irq_data *hwirq);
+extern int __init vipi_init(struct irq_data *hwirq);
 #else
-#define ipi_funnel_init(irqdata) (-EINVAL)
+static inline int vipi_init(irqdata)
+{
+	return -EINVAL;
+}
 #endif
 
 void __init set_smp_ipi_range(int ipi_base, int n)
@@ -992,7 +995,7 @@ void __init set_smp_ipi_range(int ipi_base, int n)
 	if (n < NR_IPI) {
 		int ret;
 		BUG_ON(n < 1);
-		ret = ipi_funnel_init(irq_get_irq_data(ipi_base));
+		ret = vipi_init(irq_get_irq_data(ipi_base));
 		if (ret >= 0)
 			return;
 	}

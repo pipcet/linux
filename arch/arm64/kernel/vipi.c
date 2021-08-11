@@ -115,7 +115,7 @@ static void vipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 }
 
 static struct irq_chip vipi_chip = {
-	.name = "IPI",
+	.name = "VIPI",
 	.irq_mask = vipi_mask,
 	.irq_unmask = vipi_unmask,
 	.ipi_send_mask = vipi_send_mask,
