@@ -92,6 +92,7 @@
 #define UPMSR_IACT			BIT(0)
 
 #define NR_FIQ			4
+#define FIQ_NR_IPI		1
 
 /*
  * FIQ hwirq index definitions: FIQ sources use the DT binding defines
@@ -103,18 +104,22 @@
  * mapping differs and irq_domain_translate() performs the remapping.
  */
 
-#define TMR_HV_PHYS AIC_TMR_HV_PHYS
-#define TMR_HV_VIRT AIC_TMR_HV_VIRT
-#define TMR_GUEST_PHYS AIC_TMR_GUEST_PHYS
-#define TMR_GUEST_VIRT AIC_TMR_GUEST_VIRT
+#define FIQ_TMR_HV_PHYS AIC_TMR_HV_PHYS
+#define FIQ_TMR_HV_VIRT AIC_TMR_HV_VIRT
+#define FIQ_TMR_GUEST_PHYS AIC_TMR_GUEST_PHYS
+#define FIQ_TMR_GUEST_VIRT AIC_TMR_GUEST_VIRT
 
-#define TMR_EL0_PHYS	TMR_HV_PHYS
-#define TMR_EL0_VIRT	TMR_HV_VIRT
-#define TMR_EL02_PHYS	TMR_GUEST_PHYS
-#define TMR_EL02_VIRT	TMR_GUEST_VIRT
+#define FIQ_TMR_EL0_PHYS	FIQ_TMR_HV_PHYS
+#define FIQ_TMR_EL0_VIRT	FIQ_TMR_HV_VIRT
+#define FIQ_TMR_EL02_PHYS	FIQ_TMR_GUEST_PHYS
+#define FIQ_TMR_EL02_VIRT	FIQ_TMR_GUEST_VIRT
+
+#define FIQ_IPI		4
+#define FIQ_OTHER	5
 
 struct fiq_irq_chip {
 	struct irq_domain *domain;
+	struct irq_domain *ipi_domain;
 };
 
 static DEFINE_PER_CPU(uint32_t, fiq_unmasked);
@@ -129,11 +134,11 @@ static void fiq_set_mask(struct irq_data *d)
 {
 	/* Only the guest timers have real mask bits, unfortunately. */
 	switch (irqd_to_hwirq(d)) {
-	case TMR_EL02_PHYS:
+	case FIQ_TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, VM_TMR_FIQ_ENABLE_P, 0);
 		isb();
 		break;
-	case TMR_EL02_VIRT:
+	case FIQ_TMR_EL02_VIRT:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, VM_TMR_FIQ_ENABLE_V, 0);
 		isb();
 		break;
@@ -145,11 +150,11 @@ static void fiq_set_mask(struct irq_data *d)
 static void fiq_clear_mask(struct irq_data *d)
 {
 	switch (irqd_to_hwirq(d)) {
-	case TMR_EL02_PHYS:
+	case FIQ_TMR_EL02_PHYS:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_P);
 		isb();
 		break;
-	case TMR_EL02_VIRT:
+	case FIQ_TMR_EL02_VIRT:
 		sysreg_clear_set_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2, 0, VM_TMR_FIQ_ENABLE_V);
 		isb();
 		break;
@@ -184,6 +189,7 @@ static void fiq_eoi(struct irq_data *d)
 
 void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 {
+	struct fiq_irq_chip *ic = fiq_irqc;
 	/*
 	 * It would be really nice if we had a system register that lets us get
 	 * the FIQ source state without having to peek down into sources...
@@ -202,27 +208,21 @@ void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 	if (read_sysreg_s(SYS_IMP_APL_IPI_SR_EL1) & IPI_SR_PENDING) {
 		pr_err_ratelimited("Fast IPI fired. Acking.\n");
 		write_sysreg_s(IPI_SR_PENDING, SYS_IMP_APL_IPI_SR_EL1);
-	}
-
-	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
-		handle_domain_irq(fiq_irqc->domain, TMR_EL0_PHYS, regs);
-
-	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
-		handle_domain_irq(fiq_irqc->domain, TMR_EL0_VIRT, regs);
-
-	if (is_kernel_in_hyp_mode()) {
+	} else if (TIMER_FIRING(read_sysreg(cntp_ctl_el0))) {
+		handle_domain_irq(ic->domain, FIQ_TMR_EL0_PHYS, regs);
+	} else if (TIMER_FIRING(read_sysreg(cntv_ctl_el0))) {
+		handle_domain_irq(ic->domain, FIQ_TMR_EL0_VIRT, regs);
+	} else if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTP_CTL_EL02)))
-			handle_domain_irq(fiq_irqc->domain, TMR_EL02_PHYS, regs);
+			handle_domain_irq(ic->domain, FIQ_TMR_EL02_PHYS, regs);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTV_CTL_EL02)))
-			handle_domain_irq(fiq_irqc->domain, TMR_EL02_VIRT, regs);
-	}
-
-	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
+			handle_domain_irq(fiq_irqc->domain, FIQ_TMR_EL02_VIRT, regs);
+	} else if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
 			(FIELD_PREP(PMCR0_IMODE, PMCR0_IMODE_FIQ) | PMCR0_IACT)) {
 		/*
 		 * Not supported yet, let's figure out how to handle this when
@@ -232,9 +232,7 @@ void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 		pr_err_ratelimited("PMC FIQ fired. Masking.\n");
 		sysreg_clear_set_s(SYS_IMP_APL_PMCR0_EL1, PMCR0_IMODE | PMCR0_IACT,
 				   FIELD_PREP(PMCR0_IMODE, PMCR0_IMODE_OFF));
-	}
-
-	if (FIELD_GET(UPMCR0_IMODE, read_sysreg_s(SYS_IMP_APL_UPMCR0_EL1)) == UPMCR0_IMODE_FIQ &&
+	} else if (FIELD_GET(UPMCR0_IMODE, read_sysreg_s(SYS_IMP_APL_UPMCR0_EL1)) == UPMCR0_IMODE_FIQ &&
 			(read_sysreg_s(SYS_IMP_APL_UPMSR_EL1) & UPMSR_IACT)) {
 		/* Same story with uncore PMCs */
 		pr_err_ratelimited("Uncore PMC FIQ fired. Masking.\n");
@@ -291,14 +289,14 @@ static int irq_domain_translate(struct irq_domain *id,
 		 */
 		if (!is_kernel_in_hyp_mode()) {
 			switch (fwspec->param[1]) {
-			case TMR_GUEST_PHYS:
-				*hwirq = TMR_EL0_PHYS;
+			case FIQ_TMR_GUEST_PHYS:
+				*hwirq = FIQ_TMR_EL0_PHYS;
 				break;
-			case TMR_GUEST_VIRT:
-				*hwirq = TMR_EL0_VIRT;
+			case FIQ_TMR_GUEST_VIRT:
+				*hwirq = FIQ_TMR_EL0_VIRT;
 				break;
-			case TMR_HV_PHYS:
-			case TMR_HV_VIRT:
+			case FIQ_TMR_HV_PHYS:
+			case FIQ_TMR_HV_VIRT:
 				return -ENOENT;
 			default:
 				break;
@@ -350,6 +348,11 @@ static void irq_domain_free(struct irq_domain *domain, unsigned int virq,
 
 static const struct irq_domain_ops irq_domain_ops = {
 	.translate	= irq_domain_translate,
+	.alloc		= irq_domain_alloc,
+	.free		= irq_domain_free,
+};
+
+static const struct irq_domain_ops ipi_domain_ops = {
 	.alloc		= irq_domain_alloc,
 	.free		= irq_domain_free,
 };
