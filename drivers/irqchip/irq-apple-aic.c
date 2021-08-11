@@ -245,9 +245,9 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 		irq = FIELD_GET(AIC_EVENT_NUM, event);
 
 		if (type == AIC_EVENT_TYPE_HW)
-			handle_domain_irq(aic_irqc->hw_domain, irq, regs);
-		else if (type == AIC_EVENT_TYPE_IPI && irq == 1)
-			aic_handle_ipi(regs);
+			handle_domain_irq(ic->hw_domain, irq, regs);
+		else if (type == AIC_EVENT_TYPE_IPI)
+			aic_handle_ipi(0 /* irq */, regs);
 		else if (event != 0)
 			pr_err_ratelimited("Unknown IRQ event %d, %d\n", type, irq);
 	} while (event);
