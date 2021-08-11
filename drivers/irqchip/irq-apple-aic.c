@@ -224,17 +224,9 @@ static struct irq_chip aic_chip = {
 static int aic_irq_domain_map(struct irq_domain *id, unsigned int irq,
 			      irq_hw_number_t hw)
 {
-	struct aic_irq_chip *ic = id->host_data;
-
-	if (hw < ic->nr_hw) {
-		irq_domain_set_info(id, irq, hw, &aic_chip, id->host_data,
-				    handle_fasteoi_irq, NULL, NULL);
-		irqd_set_single_target(irq_desc_get_irq_data(irq_to_desc(irq)));
-	} else {
-		irq_set_percpu_devid(irq);
-		irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
-				    handle_percpu_devid_irq, NULL, NULL);
-	}
+	irq_domain_set_info(id, irq, hw, &aic_chip, id->host_data,
+			    handle_fasteoi_irq, NULL, NULL);
+	irqd_set_single_target(irq_desc_get_irq_data(irq_to_desc(irq)));
 
 	return 0;
 }
@@ -481,6 +473,7 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 
 static int aic_init_cpu(unsigned int cpu)
 {
+	/* Mask hard-wired per-CPU IRQ sources */
 
 	/* EL2-only (VHE mode) IRQ sources */
 	if (is_kernel_in_hyp_mode()) {
@@ -488,7 +481,7 @@ static int aic_init_cpu(unsigned int cpu)
 		sysreg_clear_set_s(SYS_ICH_HCR_EL2, ICH_HCR_EN, 0);
 	}
 
-	/* Commit all of the above */
+	/* Commit the above */
 	isb();
 
 	/*
@@ -537,7 +530,7 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	irqc->nr_hw = FIELD_GET(AIC_INFO_NR_HW, info);
 
 	irqc->hw_domain = irq_domain_create_linear(of_node_to_fwnode(node),
-						   irqc->nr_hw + AIC_NR_FIQ,
+						   irqc->nr_hw,
 						   &aic_irq_domain_ops, irqc);
 	if (WARN_ON(!irqc->hw_domain)) {
 		iounmap(irqc->base);
