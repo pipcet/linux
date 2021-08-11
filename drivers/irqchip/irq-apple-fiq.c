@@ -177,9 +177,9 @@ static void fiq_eoi(struct irq_data *d)
 		fiq_clear_mask(d);
 }
 
-#define TIMER_FIRING(x)                                                        \
-	(((x) & (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_MASK |            \
-		 ARCH_TIMER_CTRL_IT_STAT)) ==                                  \
+#define TIMER_FIRING(x)						\
+	(((x) & (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_MASK |	\
+		 ARCH_TIMER_CTRL_IT_STAT)) ==				\
 	 (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_STAT))
 
 void __exception_irq_entry handle_fiq(struct pt_regs *regs)
