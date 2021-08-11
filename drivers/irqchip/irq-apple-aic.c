@@ -101,11 +101,11 @@ struct aic_irq_chip {
 	int nr_hw;
 };
 
-#define AIC_NR_IPI 2
+#define AIC_NR_IPI 1
 
 static struct aic_irq_chip *aic_irqc;
 
-static void aic_handle_ipi(struct pt_regs *regs, int index);
+static void aic_handle_ipi(int index, struct pt_regs *regs);
 
 static u32 aic_ic_read(struct aic_irq_chip *ic, u32 reg)
 {
@@ -152,28 +152,28 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 	struct aic_irq_chip *ic = aic_irqc;
 	u32 event, type, irq;
 
-	do {
-		/*
-		 * We cannot use a relaxed read here, as reads from DMA buffers
-		 * need to be ordered after the IRQ fires.
-		 */
-		event = readl(ic->base + AIC_EVENT);
-		type = FIELD_GET(AIC_EVENT_TYPE, event);
-		irq = FIELD_GET(AIC_EVENT_NUM, event);
+	/*
+	 * We cannot use a relaxed read here, as reads from DMA buffers
+	 * need to be ordered after the IRQ fires.
+	 */
+	event = readl(ic->base + AIC_EVENT);
+	type = FIELD_GET(AIC_EVENT_TYPE, event);
+	irq = FIELD_GET(AIC_EVENT_NUM, event);
 
-		if (type == AIC_EVENT_TYPE_HW)
-			handle_domain_irq(ic->hw_domain, irq, regs);
-		else if (type == AIC_EVENT_TYPE_IPI && irq == 1)
-			aic_handle_ipi(regs, 0);
-		else if (event != 0)
-			pr_err_ratelimited("Unknown IRQ event %d, %d\n", type, irq);
-	} while (event);
+	if (type == AIC_EVENT_TYPE_HW)
+		handle_domain_irq(ic->hw_domain, irq, regs);
+	else if (type == AIC_EVENT_TYPE_IPI)
+		aic_handle_ipi(0 /* irq */, regs);
+	else if (event != 0)
+		pr_err_ratelimited("Unknown IRQ event %d, %d\n", type, irq);
 
 	/*
 	 * vGIC maintenance interrupts end up here too, so we need to check
 	 * for them separately. This should never trigger if KVM is working
 	 * properly, because it will have already taken care of clearing it
 	 * on guest exit before this handler runs.
+	 *
+	 * XXX it would be nice to skip this check.
 	 */
 	if (is_kernel_in_hyp_mode() && (read_sysreg_s(SYS_ICH_HCR_EL2) & ICH_HCR_EN) &&
 		read_sysreg_s(SYS_ICH_MISR_EL2) != 0) {
@@ -188,14 +188,13 @@ static int aic_irq_set_affinity(struct irq_data *d,
 	irq_hw_number_t hwirq = irqd_to_hwirq(d);
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
 	int cpu;
+	u32 mask = 0;
 
-	if (force)
-		cpu = cpumask_first(mask_val);
-	else
-		cpu = cpumask_any_and(mask_val, cpu_online_mask);
+	for_each_cpu(cpu, mask_val)
+		mask |= BIT(cpu);
 
-	aic_ic_write(ic, AIC_TARGET_CPU + hwirq * 4, BIT(cpu));
-	irq_data_update_effective_affinity(d, cpumask_of(cpu));
+	aic_ic_write(ic, AIC_TARGET_CPU + hwirq * 4, mask);
+	irq_data_update_effective_affinity(d, mask_val);
 
 	return IRQ_SET_MASK_OK;
 }
@@ -301,14 +300,19 @@ static const struct irq_domain_ops aic_irq_domain_ops = {
  * IPI irqchip
  */
 
+static int aic_ipi_number(struct irq_data *d)
+{
+	return irqd_to_hwirq(d) ? AIC_IPI_OTHER : AIC_IPI_OTHER;
+}
+
 static void aic_ipi_mask(struct irq_data *d)
 {
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_SET, AIC_IPI_OTHER);
+	aic_ic_write(aic_irqc, AIC_IPI_MASK_SET, aic_ipi_number(d));
 }
 
 static void aic_ipi_unmask(struct irq_data *d)
 {
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
+	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, aic_ipi_number(d));
 }
 
 static void aic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
@@ -335,21 +339,24 @@ static struct irq_chip ipi_chip = {
  * IPI IRQ domain
  */
 
-static void aic_handle_ipi(struct pt_regs *regs, int index)
+static void aic_handle_ipi(int index, struct pt_regs *regs)
 {
+	struct irq_domain *domain = aic_irqc->ipi_domain;
+	struct aic_irq_chip *ic = aic_irqc;
 	/*
 	 * Ack the IPI. We need to order this after the AIC event read, but
 	 * that is enforced by normal MMIO ordering guarantees.
 	 */
-	aic_ic_write(aic_irqc, AIC_IPI_ACK, AIC_IPI_OTHER);
+	aic_ic_write(ic, AIC_IPI_ACK,
+		     aic_ipi_number(irq_domain_get_irq_data(domain, index)));
 
-	handle_domain_irq(aic_irqc->ipi_domain, index, regs);
+	handle_domain_irq(domain, index, regs);
 
 	/*
 	 * No ordering needed here; at worst this just changes the timing of
 	 * when the next IPI will be delivered.
 	 */
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
+	aic_ic_write(ic, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
 }
 
 static int aic_ipi_alloc(struct irq_domain *d, unsigned int virq,
@@ -392,12 +399,9 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 	base_ipi = __irq_domain_alloc_irqs(ipi_domain, -1, AIC_NR_IPI,
 					   NUMA_NO_NODE, NULL, false, NULL);
 
-	if (WARN_ON(!base_ipi)) {
-		irq_domain_remove(ipi_domain);
-		return -ENODEV;
+	if (base_ipi && of_property_read_bool(node, "use-for-ipi")) {
+		set_smp_ipi_range(base_ipi, AIC_NR_IPI);
 	}
-
-	set_smp_ipi_range(base_ipi, AIC_NR_IPI);
 
 	irqc->ipi_domain = ipi_domain;
 
@@ -443,6 +447,7 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	void __iomem *regs;
 	u32 info;
 	struct aic_irq_chip *irqc;
+	bool use_for_ipi = of_property_read_bool(node, "use-for-ipi");
 
 	regs = of_iomap(node, 0);
 	if (WARN_ON(!regs))
@@ -491,7 +496,8 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 
 	vgic_set_kvm_info(&vgic_info);
 
-	pr_info("Initialized with %d IRQs, 1 IPI\n", irqc->nr_hw);
+	pr_info("Initialized with %d IRQs, 1 IPI, %sused for IPI\n", irqc->nr_hw,
+		use_for_ipi ? "" : "not ");
 
 	return 0;
 }

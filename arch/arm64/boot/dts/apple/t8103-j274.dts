@@ -28,15 +28,28 @@
 
 		framebuffer0: framebuffer@0 {
 			compatible = "apple,simple-framebuffer", "simple-framebuffer";
-			reg = <0 0 0 0>; /* To be filled by loader */
-			/* Format properties will be added by loader */
-			status = "disabled";
+			reg = <0xb 0xdf438000 0 0x3e80000>;
+			format = "x8r8g8b8";
+			height = <0x640>;
+			stride = <0x2800>;
+			width = <0xa00>;
+			status = "okay";
 		};
+	};
+
+	soc {
+		aic: interrupt-controller@23b100000 {
+		        use-for-ipi;
+		};
+	};
+
+	fiq: interrupt-controller {
+	     	/* use-for-ipi; */
 	};
 
 	memory@800000000 {
 		device_type = "memory";
-		reg = <0x8 0 0x2 0>; /* To be filled by loader */
+		reg = <0x9 0 0x2 0>; /* To be filled by loader */
 	};
 };
 
