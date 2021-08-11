@@ -91,7 +91,7 @@
 #define SYS_IMP_APL_UPMSR_EL1		sys_reg(3, 7, 15, 6, 4)
 #define UPMSR_IACT			BIT(0)
 
-#define NR_FIQ			4
+#define NR_FIQ			6
 #define FIQ_NR_IPI		1
 
 /*
@@ -114,8 +114,7 @@
 #define FIQ_TMR_EL02_PHYS	FIQ_TMR_GUEST_PHYS
 #define FIQ_TMR_EL02_VIRT	FIQ_TMR_GUEST_VIRT
 
-#define FIQ_IPI		4
-#define FIQ_OTHER	5
+#define FIQ_OTHER	4
 
 struct fiq_irq_chip {
 	struct irq_domain *domain;
@@ -182,6 +181,18 @@ static void fiq_eoi(struct irq_data *d)
 		fiq_clear_mask(d);
 }
 
+static void fiq_ipi_mask(struct irq_data *d)
+{
+}
+
+static void fiq_ipi_unmask(struct irq_data *d)
+{
+}
+
+static void fiq_ipi_eoi(struct irq_data *d)
+{
+}
+
 #define TIMER_FIRING(x)						\
 	(((x) & (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_MASK |	\
 		 ARCH_TIMER_CTRL_IT_STAT)) ==				\
@@ -205,9 +216,9 @@ void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 	 * we check for everything here, even things we don't support yet.
 	 */
 
-	if (read_sysreg_s(SYS_IMP_APL_IPI_SR_EL1) & IPI_SR_PENDING) {
-		pr_err_ratelimited("Fast IPI fired. Acking.\n");
+	if (read_sysreg_s(SYS_IMP_APL_IPI_SR_EL1) != 0) {
 		write_sysreg_s(IPI_SR_PENDING, SYS_IMP_APL_IPI_SR_EL1);
+		handle_domain_irq(ic->ipi_domain, 0, regs);
 	} else if (TIMER_FIRING(read_sysreg(cntp_ctl_el0))) {
 		handle_domain_irq(ic->domain, FIQ_TMR_EL0_PHYS, regs);
 	} else if (TIMER_FIRING(read_sysreg(cntv_ctl_el0))) {
@@ -246,6 +257,29 @@ static int fiq_set_type(struct irq_data *d, unsigned int type)
 	return (type == IRQ_TYPE_LEVEL_HIGH) ? 0 : -EINVAL;
 }
 
+static void fiq_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
+{
+	int cpu;
+
+	for_each_cpu(cpu, mask) {
+		int lcpu = get_cpu();
+
+		if ((lcpu ^ cpu) & 4) {
+			u64 val = (FIELD_PREP(IPI_RR_TYPE, IPI_RR_IMMEDIATE) |
+				   FIELD_PREP(IPI_RR_CLUSTER, !!(cpu & 4)) |
+				   (cpu & 3));
+			write_sysreg_s(val, SYS_IMP_APL_IPI_RR_GLOBAL_EL1);
+		} else {
+			u64 val = cpu & 3;
+			write_sysreg_s(val, SYS_IMP_APL_IPI_RR_LOCAL_EL1);
+		}
+
+		put_cpu();
+	}
+
+	isb();
+}
+
 static struct irq_chip fiq_chip = {
 	.name = "FIQ",
 	.irq_mask = fiq_mask,
@@ -255,12 +289,19 @@ static struct irq_chip fiq_chip = {
 	.irq_set_type = fiq_set_type,
 };
 
+static struct irq_chip fiq_ipi_chip = {
+	.name = "FIQ-IPI",
+	.irq_mask = fiq_ipi_mask,
+	.irq_unmask = fiq_ipi_unmask,
+	.ipi_send_mask = fiq_ipi_send_mask,
+};
+
 /*
  * Main IRQ domain
  */
 
 static int irq_domain_map(struct irq_domain *id, unsigned int irq,
-			      irq_hw_number_t hw)
+			  irq_hw_number_t hw)
 {
 	irq_set_percpu_devid(irq);
 	irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
@@ -270,9 +311,9 @@ static int irq_domain_map(struct irq_domain *id, unsigned int irq,
 }
 
 static int irq_domain_translate(struct irq_domain *id,
-				    struct irq_fwspec *fwspec,
-				    unsigned long *hwirq,
-				    unsigned int *type)
+				struct irq_fwspec *fwspec,
+				unsigned long *hwirq,
+				unsigned int *type)
 {
 	if (fwspec->param_count != 3 || !is_of_node(fwspec->fwnode))
 		return -EINVAL;
@@ -332,6 +373,21 @@ static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 
 	return 0;
 }
+static int ipi_domain_alloc(struct irq_domain *domain, unsigned int virq,
+			    unsigned int nr_irqs, void *arg)
+{
+	unsigned int type = IRQ_TYPE_NONE;
+	irq_hw_number_t hwirq;
+	int i, ret;
+
+	for (i = 0; i < nr_irqs; i++) {
+		irq_set_percpu_devid(virq + i);
+		irq_domain_set_info(domain, virq + i, i, &fiq_ipi_chip, domain->host_data,
+				    handle_percpu_devid_irq, NULL, NULL);
+	}
+
+	return 0;
+}
 
 static void irq_domain_free(struct irq_domain *domain, unsigned int virq,
 			    unsigned int nr_irqs)
@@ -353,7 +409,7 @@ static const struct irq_domain_ops irq_domain_ops = {
 };
 
 static const struct irq_domain_ops ipi_domain_ops = {
-	.alloc		= irq_domain_alloc,
+	.alloc		= ipi_domain_alloc,
 	.free		= irq_domain_free,
 };
 
@@ -425,7 +481,7 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 {
 	struct fiq_irq_chip *ic;
 	unsigned int fiq_other;
-	int base_ipi;
+	int base_ipi = 0;
 	bool use_for_ipi = of_property_read_bool(node, "use-for-ipi");
 
 	ic = kzalloc(sizeof(*ic), GFP_KERNEL);
@@ -441,20 +497,22 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 		return -ENODEV;
 	}
 
-	if (of_property_read_bool(node, "use-for-ipi"))
-		ic->ipi_domain =
-			irq_domain_create_linear(of_node_to_fwnode(node),
-						 FIQ_NR_IPI,
-						 &ipi_domain_ops, ic);
+	ic->ipi_domain =
+		irq_domain_create_hierarchy(NULL,
+					    IRQ_DOMAIN_FLAG_IPI_SINGLE,
+					    FIQ_NR_IPI,
+					    __irq_domain_alloc_fwnode(IRQCHIP_FWNODE_NAMED, 0, "fiq-ipi", NULL),
+					    &ipi_domain_ops, ic);
 	if (ic->ipi_domain) {
-		ic->ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
+		if (use_for_ipi) {
+			irq_domain_update_bus_token(ic->ipi_domain, DOMAIN_BUS_IPI);
 
-		base_ipi =
-		  __irq_domain_alloc_irqs(ic->ipi_domain, -1, FIQ_NR_IPI,
-					  NUMA_NO_NODE, NULL, false, NULL);
+			base_ipi =__irq_domain_alloc_irqs(ic->ipi_domain, -1, FIQ_NR_IPI,
+							  NUMA_NO_NODE, NULL, false, NULL);
 
-		if (base_ipi && of_property_read_bool(node, "use-for-ipi")) {
-			set_smp_ipi_range(base_ipi, FIQ_NR_IPI);
+			printk("base IPI %d\n", base_ipi);
+			if (base_ipi >= 0)
+				set_smp_ipi_range(base_ipi, FIQ_NR_IPI);
 		}
 	}
 
