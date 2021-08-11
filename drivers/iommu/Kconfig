@@ -263,6 +263,18 @@ config APPLE_DART
 
 	  Say Y here if you are using an Apple SoC.
 
+config APPLE_DART_LOCKED_PAGE_TABLES
+       bool "Apple DART IOMMU locked page table support"
+       depends on APPLE_DART=y && CMA
+       default APPLE_DART
+       help
+	  The page table base registers in the DART IOMMU are
+	  sometimes locked, so the existing page table has to be
+	  reused by the driver rather than configuring a new one. This
+	  only works if the DART driver is not compiled as a module.
+
+	  Say Y here if you are using the DART driver.
+
 # ARM IOMMU support
 config ARM_SMMU
 	tristate "ARM Ltd. System MMU (SMMU) Support"

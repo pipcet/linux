@@ -139,6 +139,7 @@ struct io_pgtable_cfg {
 		} arm_mali_lpae_cfg;
 
 		struct {
+			bool locked;
 			u64 ttbr[4];
 			u32 n_ttbrs;
 		} apple_dart_cfg;

@@ -543,6 +543,8 @@ static void __arm_lpae_free_pgtable(struct arm_lpae_io_pgtable *data, int lvl,
 		__arm_lpae_free_pgtable(data, lvl + 1, iopte_deref(pte, data));
 	}
 
+	/* XXX only do this if this part of the page table was
+	 * allocated by us. */
 	__arm_lpae_free_pages(start, table_size, &data->iop.cfg);
 }
 
@@ -1144,8 +1146,22 @@ apple_dart_alloc_pgtable(struct io_pgtable_cfg *cfg, void *cookie)
 	cfg->apple_dart_cfg.n_ttbrs = 1 << data->pgd_bits;
 	data->pgd_bits += data->bits_per_level;
 
-	data->pgd = __arm_lpae_alloc_pages(ARM_LPAE_PGD_SIZE(data), GFP_KERNEL,
-					   cfg);
+	if (cfg->apple_dart_cfg.ttbr[0]) {
+		printk("TTBR0 %016llx\n", cfg->apple_dart_cfg.ttbr[0]);
+		printk("TTBR1 %016llx\n", cfg->apple_dart_cfg.ttbr[1]);
+		printk("TTBR2 %016llx\n", cfg->apple_dart_cfg.ttbr[2]);
+		printk("TTBR3 %016llx\n", cfg->apple_dart_cfg.ttbr[3]);
+		for (i = 0; i < cfg->apple_dart_cfg.n_ttbrs; i++) {
+			if (cfg->apple_dart_cfg.ttbr[i] !=
+			    cfg->apple_dart_cfg.ttbr[0] + i * ARM_LPAE_GRANULE(data))
+				printk(KERN_EMERG "mismatch!\n");
+		}
+		data->pgd = __va(cfg->apple_dart_cfg.ttbr[0]);
+	} else {
+		data->pgd = __arm_lpae_alloc_pages(ARM_LPAE_PGD_SIZE(data), GFP_KERNEL,
+						   cfg);
+	}
+
 	if (!data->pgd)
 		goto out_free_data;
 
