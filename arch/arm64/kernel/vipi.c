@@ -25,20 +25,20 @@
  * IPI irqchip
  */
 
-static void aic_ipi_mask(struct irq_data *d)
+static void vipi_mask(struct irq_data *d)
 {
 	u32 irq_bit = BIT(irqd_to_hwirq(d));
 
 	/* No specific ordering requirements needed here. */
-	atomic_andnot(irq_bit, this_cpu_ptr(&aic_vipi_enable));
+	atomic_andnot(irq_bit, this_cpu_ptr(&vipi_enable));
 }
 
-static void aic_ipi_unmask(struct irq_data *d)
+static void vipi_unmask(struct irq_data *d)
 {
-	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
+	struct vipi_irq_chip *ic = irq_data_get_irq_chip_data(d);
 	u32 irq_bit = BIT(irqd_to_hwirq(d));
 
-	atomic_or(irq_bit, this_cpu_ptr(&aic_vipi_enable));
+	atomic_or(irq_bit, this_cpu_ptr(&vipi_enable));
 
 	/*
 	 * The atomic_or() above must complete before the atomic_read()
@@ -50,31 +50,35 @@ static void aic_ipi_unmask(struct irq_data *d)
 	 * If a pending vIPI was unmasked, raise a HW IPI to ourselves.
 	 * No barriers needed here since this is a self-IPI.
 	 */
-	if (atomic_read(this_cpu_ptr(&aic_vipi_flag)) & irq_bit)
-		aic_ic_write(ic, AIC_IPI_SEND, AIC_IPI_SEND_CPU(smp_processor_id()));
+	if (atomic_read(this_cpu_ptr(&vipi_flag)) & irq_bit) {
+		struct cpumask self_mask = { 0, };
+		cpumask_set_cpu(smp_processor_id(), &self_mask);
+		ipi_send_mask(ic->hwirq->irq, &self_mask);
+	}
 }
 
-static void aic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
+static void vipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 {
-	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
+	struct vipi_irq_chip *ic = irq_data_get_irq_chip_data(d);
 	u32 irq_bit = BIT(irqd_to_hwirq(d));
-	u32 send = 0;
 	int cpu;
+	bool send = false;
 	unsigned long pending;
+	struct cpumask sendmask = *mask;
 
 	for_each_cpu(cpu, mask) {
 		/*
-		 * This sequence is the mirror of the one in aic_ipi_unmask();
+		 * This sequence is the mirror of the one in vipi_unmask();
 		 * see the comment there. Additionally, release semantics
 		 * ensure that the vIPI flag set is ordered after any shared
 		 * memory accesses that precede it. This therefore also pairs
-		 * with the atomic_fetch_andnot in aic_handle_ipi().
+		 * with the atomic_fetch_andnot in handle_ipi().
 		 */
-		pending = atomic_fetch_or_release(irq_bit, per_cpu_ptr(&aic_vipi_flag, cpu));
+		pending = atomic_fetch_or_release(irq_bit, per_cpu_ptr(&vipi_flag, cpu));
 
 		/*
 		 * The atomic_fetch_or_release() above must complete before the
-		 * atomic_read() below to avoid racing aic_ipi_unmask().
+		 * atomic_read() below to avoid racing vipi_unmask().
 		 */
 		smp_mb__after_atomic();
 
@@ -93,18 +97,18 @@ static void aic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 		aic_ic_write(ic, AIC_IPI_SEND, send);
 }
 
-static struct irq_chip ipi_chip = {
-	.name = "AIC-IPI",
-	.irq_mask = aic_ipi_mask,
-	.irq_unmask = aic_ipi_unmask,
-	.ipi_send_mask = aic_ipi_send_mask,
+static struct irq_chip vipi_chip = {
+	.name = "VIPI",
+	.irq_mask = vipi_mask,
+	.irq_unmask = vipi_unmask,
+	.ipi_send_mask = vipi_send_mask,
 };
 
 /*
  * IPI IRQ domain
  */
 
-static void aic_handle_ipi(struct pt_regs *regs)
+static void handle_ipi(struct irq_desc *d)
 {
 	int i;
 	unsigned long enabled, firing;
@@ -115,72 +119,72 @@ static void aic_handle_ipi(struct pt_regs *regs)
 	 * we are properly in the interrupt handler (which is covered by
 	 * the barrier that is part of the top-level AIC handler's readl()).
 	 */
-	enabled = atomic_read(this_cpu_ptr(&aic_vipi_enable));
+	enabled = atomic_read(this_cpu_ptr(&vipi_enable));
 
 	/*
 	 * Clear the IPIs we are about to handle. This pairs with the
-	 * atomic_fetch_or_release() in aic_ipi_send_mask(), and needs to be
-	 * ordered after the aic_ic_write() above (to avoid dropping vIPIs) and
+	 * atomic_fetch_or_release() in vipi_send_mask(), and needs to be
+	 * ordered after the ic_write() above (to avoid dropping vIPIs) and
 	 * before IPI handling code (to avoid races handling vIPIs before they
 	 * are signaled). The former is taken care of by the release semantics
 	 * of the write portion, while the latter is taken care of by the
 	 * acquire semantics of the read portion.
 	 */
-	firing = atomic_fetch_andnot(enabled, this_cpu_ptr(&aic_vipi_flag)) & enabled;
+	firing = atomic_fetch_andnot(enabled, this_cpu_ptr(&vipi_flag)) & enabled;
 
 	for_each_set_bit(i, &firing, AIC_NR_SWIPI)
 		handle_domain_irq(aic_irqc->ipi_domain, i, regs);
 
 }
 
-static int aic_ipi_alloc(struct irq_domain *d, unsigned int virq,
-			 unsigned int nr_irqs, void *args)
+static int vipi_alloc(struct irq_domain *d, unsigned int virq,
+		     unsigned int nr_irqs, void *args)
 {
 	int i;
 
 	for (i = 0; i < nr_irqs; i++) {
 		irq_set_percpu_devid(virq + i);
-		irq_domain_set_info(d, virq + i, i, &ipi_chip, d->host_data,
+		irq_domain_set_info(d, virq + i, i, &vipi_chip, d->host_data,
 				    handle_percpu_devid_irq, NULL, NULL);
 	}
 
 	return 0;
 }
 
-static void aic_ipi_free(struct irq_domain *d, unsigned int virq, unsigned int nr_irqs)
+static void vipi_free(struct irq_domain *d, unsigned int virq, unsigned int nr_irqs)
 {
 	/* Not freeing IPIs */
 }
 
-static const struct irq_domain_ops aic_ipi_domain_ops = {
-	.alloc = aic_ipi_alloc,
-	.free = aic_ipi_free,
+static const struct irq_domain_ops vipi_domain_ops = {
+	.alloc = vipi_alloc,
+	.free = vipi_free,
 };
 
-static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
+static int vipi_init_smp(struct vipi_irq_chip *irqc)
 {
-	struct irq_domain *ipi_domain;
+	struct irq_domain *vipi_domain;
 	int base_ipi;
 
 	ipi_domain = irq_domain_create_linear(irqc->hw_domain->fwnode, AIC_NR_SWIPI,
-					      &aic_ipi_domain_ops, irqc);
-	if (WARN_ON(!ipi_domain))
-		return -ENODEV;
+					      &vipi_domain_ops, irqc);
+	if (WARN_ON(!vipi_domain))
+		return -ENOMEM;
 
-	ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
-	irq_domain_update_bus_token(ipi_domain, DOMAIN_BUS_IPI);
+	vipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
+	irq_domain_update_bus_token(vipi_domain, DOMAIN_BUS_IPI);
 
-	base_ipi = __irq_domain_alloc_irqs(ipi_domain, -1, AIC_NR_SWIPI,
+	base_ipi = __irq_domain_alloc_irqs(vipi_domain, -1, NR_SWIPI,
 					   NUMA_NO_NODE, NULL, false, NULL);
 
 	if (WARN_ON(base_ipi < 0)) {
-		irq_domain_remove(ipi_domain);
+		irq_domain_remove(vipi_domain);
 		return -ENODEV;
 	}
 
-	set_smp_ipi_range(base_ipi, AIC_NR_SWIPI);
+	set_smp_ipi_range(base_ipi, NR_SWIPI);
 
-	irqc->ipi_domain = ipi_domain;
+	irqc->domain = vipi_domain;
 
 	return 0;
 }
