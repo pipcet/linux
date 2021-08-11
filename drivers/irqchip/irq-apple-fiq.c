@@ -392,21 +392,68 @@ int fiq_init_cpu(unsigned int cpu)
 	return 0;
 }
 
+/* Regular old IRQ handler for "other" FIQs. This will have to go away
+ * and forward the PMC FIQs at some point, but for now it's better to
+ * have the stats that we get from a regular IRQ handler. */
+
+static enum irqreturn fiq_handler(int irq, void *ptr)
+{
+	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
+			(FIELD_PREP(PMCR0_IMODE, PMCR0_IMODE_FIQ) | PMCR0_IACT)) {
+		/*
+		 * Not supported yet, let's figure out how to handle this when
+		 * we implement these proprietary performance counters. For now,
+		 * just mask it and move on.
+		 */
+		pr_err_ratelimited("PMC FIQ fired. Masking.\n");
+		sysreg_clear_set_s(SYS_IMP_APL_PMCR0_EL1, PMCR0_IMODE | PMCR0_IACT,
+				   FIELD_PREP(PMCR0_IMODE, PMCR0_IMODE_OFF));
+		return IRQ_HANDLED;
+	} else if (FIELD_GET(UPMCR0_IMODE, read_sysreg_s(SYS_IMP_APL_UPMCR0_EL1)) == UPMCR0_IMODE_FIQ &&
+			(read_sysreg_s(SYS_IMP_APL_UPMSR_EL1) & UPMSR_IACT)) {
+		/* Same story with uncore PMCs */
+		pr_err_ratelimited("Uncore PMC FIQ fired. Masking.\n");
+		sysreg_clear_set_s(SYS_IMP_APL_UPMCR0_EL1, UPMCR0_IMODE,
+				   FIELD_PREP(UPMCR0_IMODE, UPMCR0_IMODE_OFF));
+		return IRQ_HANDLED;
+	}
+
+	return IRQ_NONE;
+}
+
 static int __init fiq_of_ic_init(struct device_node *node, struct device_node *parent)
 {
-	struct fiq_irq_chip *irqc;
+	struct fiq_irq_chip *ic;
+	unsigned int fiq_other;
+	int base_ipi;
+	bool use_for_ipi = of_property_read_bool(node, "use-for-ipi");
 
-	irqc = kzalloc(sizeof(*irqc), GFP_KERNEL);
-	if (!irqc)
+	ic = kzalloc(sizeof(*ic), GFP_KERNEL);
+	if (!ic)
 		return -ENOMEM;
 
-	fiq_irqc = irqc;
+	fiq_irqc = ic;
 
-	irqc->domain = irq_domain_create_linear(of_node_to_fwnode(node),
-						   NR_FIQ, &irq_domain_ops, irqc);
-	if (WARN_ON(!irqc->domain)) {
-		kfree(irqc);
+	ic->domain = irq_domain_create_linear(of_node_to_fwnode(node),
+					      NR_FIQ, &irq_domain_ops, ic);
+	if (WARN_ON(!ic->domain)) {
+		kfree(ic);
 		return -ENODEV;
+	}
+
+	if (of_property_read_bool(node, "use-for-ipi"))
+		ic->ipi_domain = irq_domain_create_linear
+			(of_node_to_fwnode(node), FIQ_NR_IPI,
+			 &ipi_domain_ops, ic);
+	if (ic->ipi_domain) {
+		ic->ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
+
+		base_ipi = __irq_domain_alloc_irqs(ic->ipi_domain, -1, FIQ_NR_IPI,
+						   NUMA_NO_NODE, NULL, false, NULL);
+
+		if (base_ipi) {
+			set_smp_ipi_range(base_ipi, FIQ_NR_IPI);
+		}
 	}
 
 	set_handle_fiq(handle_fiq);
@@ -418,7 +465,12 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 			  "irqchip/apple-fiq/fiq:starting",
 			  fiq_init_cpu, NULL);
 
-	pr_info("Initialized with %d FIQs\n", NR_FIQ);
+	if (__irq_resolve_mapping(ic->domain, FIQ_OTHER, &fiq_other))
+		WARN_ON(request_irq(fiq_other, fiq_handler, IRQF_SHARED,
+				    "PMC FIQ handler", ic) < 0);
+
+	pr_info("Initialized with %d FIQs, %sused for IPI\n", NR_FIQ,
+		use_for_ipi ? "" : "not ");;
 
 	return 0;
 }
