@@ -441,9 +441,11 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 		return -ENODEV;
 	}
 
-	ic->ipi_domain = irq_domain_create_linear(of_node_to_fwnode(node),
-						  FIQ_NR_IPI,
-						  &ipi_domain_ops, ic);
+	if (of_property_read_bool(node, "use-for-ipi"))
+		ic->ipi_domain =
+			irq_domain_create_linear(of_node_to_fwnode(node),
+						 FIQ_NR_IPI,
+						 &ipi_domain_ops, ic);
 	if (ic->ipi_domain) {
 		ic->ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
 

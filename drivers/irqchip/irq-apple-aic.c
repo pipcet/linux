@@ -474,7 +474,7 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 
 	irq_domain_update_bus_token(irqc->hw_domain, DOMAIN_BUS_WIRED);
 
-	if (aic_init_smp(irqc, node)) {
+	if (use_for_ipi && aic_init_smp(irqc, node)) {
 		irq_domain_remove(irqc->hw_domain);
 		iounmap(irqc->base);
 		kfree(irqc);
