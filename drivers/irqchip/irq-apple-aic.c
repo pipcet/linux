@@ -406,7 +406,7 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 
 static int aic_init_cpu(unsigned int cpu)
 {
-	/* Mask all hard-wired per-CPU IRQ sources */
+	/* Mask hard-wired per-CPU IRQ sources */
 
 	/* EL2-only (VHE mode) IRQ sources */
 	if (is_kernel_in_hyp_mode()) {
@@ -414,7 +414,7 @@ static int aic_init_cpu(unsigned int cpu)
 		sysreg_clear_set_s(SYS_ICH_HCR_EL2, ICH_HCR_EN, 0);
 	}
 
-	/* Commit all of the above */
+	/* Commit the above */
 	isb();
 
 	/*
