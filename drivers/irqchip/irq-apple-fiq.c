@@ -441,17 +441,17 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 		return -ENODEV;
 	}
 
-	if (of_property_read_bool(node, "use-for-ipi"))
-		ic->ipi_domain = irq_domain_create_linear
-			(of_node_to_fwnode(node), FIQ_NR_IPI,
-			 &ipi_domain_ops, ic);
+	ic->ipi_domain = irq_domain_create_linear(of_node_to_fwnode(node),
+						  FIQ_NR_IPI,
+						  &ipi_domain_ops, ic);
 	if (ic->ipi_domain) {
 		ic->ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
 
-		base_ipi = __irq_domain_alloc_irqs(ic->ipi_domain, -1, FIQ_NR_IPI,
-						   NUMA_NO_NODE, NULL, false, NULL);
+		base_ipi =
+		  __irq_domain_alloc_irqs(ic->ipi_domain, -1, FIQ_NR_IPI,
+					  NUMA_NO_NODE, NULL, false, NULL);
 
-		if (base_ipi) {
+		if (base_ipi && of_property_read_bool(node, "use-for-ipi")) {
 			set_smp_ipi_range(base_ipi, FIQ_NR_IPI);
 		}
 	}
