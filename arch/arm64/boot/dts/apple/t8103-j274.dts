@@ -34,6 +34,16 @@
 		};
 	};
 
+	soc {
+		aic: interrupt-controller@23b100000 {
+		        /* use-for-ipi; */
+		};
+	};
+
+	fiq: interrupt-controller {
+	     	use-for-ipi;
+	};
+
 	memory@800000000 {
 		device_type = "memory";
 		reg = <0x8 0 0x2 0>; /* To be filled by loader */
