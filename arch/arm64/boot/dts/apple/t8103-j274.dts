@@ -38,6 +38,30 @@
 		device_type = "memory";
 		reg = <0x8 0 0x2 0>; /* To be filled by loader */
 	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		botmem {
+		        reg = <0x8 0 0 0>; /* To be filled by loader */
+		        no-map; /* to be safe */
+		};
+
+		topmem-before-framebuffer {
+			reg = <0x9 0 0 0x80000000>; /* To be filled by loader */
+		};
+
+		framebuffer {
+			reg = <0x9 0x80000000 0 0x40000000>; /* To be filled by loader */
+			no-map; /* so simplefb works */
+		};
+
+		topmem-after-framebuffer {
+			reg = <0x9 0xc0000000 0 0x40000000>; /* To be filled by loader */
+		};
+	};
 };
 
 &serial0 {
