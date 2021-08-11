@@ -21,8 +21,8 @@
 #include <asm/sysreg.h>
 #include <asm/virt.h>
 
-struct ipi_funnel_irq_chip {
-	struct irq_domain *ipi_funnel_domain;
+struct vipi_irq_chip {
+	struct irq_domain *vipi_domain;
 	struct irq_data *hwirq;
 	void (*send_hwipi)(struct cpumask *);
 };
@@ -32,14 +32,14 @@ struct ipi_funnel_irq_chip {
 static DEFINE_PER_CPU(atomic_t, vipi_flag);
 static DEFINE_PER_CPU(atomic_t, vipi_enable);
 
-static struct ipi_funnel_irq_chip *ipi_funnel_irqc;
+static struct vipi_irq_chip *vipi_irqc;
 
 static void handle_ipi(struct irq_desc *d);
 /*
  * IPI irqchip
  */
 
-static void ipi_funnel_mask(struct irq_data *d)
+static void vipi_mask(struct irq_data *d)
 {
 	u32 irq_bit = BIT(irqd_to_hwirq(d));
 
@@ -47,9 +47,9 @@ static void ipi_funnel_mask(struct irq_data *d)
 	atomic_andnot(irq_bit, this_cpu_ptr(&vipi_enable));
 }
 
-static void ipi_funnel_unmask(struct irq_data *d)
+static void vipi_unmask(struct irq_data *d)
 {
-	struct ipi_funnel_irq_chip *ic = irq_data_get_irq_chip_data(d);
+	struct vipi_irq_chip *ic = irq_data_get_irq_chip_data(d);
 	u32 irq_bit = BIT(irqd_to_hwirq(d));
 
 	atomic_or(irq_bit, this_cpu_ptr(&vipi_enable));
@@ -72,9 +72,9 @@ static void ipi_funnel_unmask(struct irq_data *d)
 }
 
 
-static void ipi_funnel_send_mask(struct irq_data *d, const struct cpumask *mask)
+static void vipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 {
-	struct ipi_funnel_irq_chip *ic = irq_data_get_irq_chip_data(d);
+	struct vipi_irq_chip *ic = irq_data_get_irq_chip_data(d);
 	u32 irq_bit = BIT(irqd_to_hwirq(d));
 	int cpu;
 	bool send;
@@ -83,7 +83,7 @@ static void ipi_funnel_send_mask(struct irq_data *d, const struct cpumask *mask)
 
 	for_each_cpu(cpu, mask) {
 		/*
-		 * This sequence is the mirror of the one in ipi_funnel_unmask();
+		 * This sequence is the mirror of the one in vipi_unmask();
 		 * see the comment there. Additionally, release semantics
 		 * ensure that the vIPI flag set is ordered after any shared
 		 * memory accesses that precede it. This therefore also pairs
@@ -93,7 +93,7 @@ static void ipi_funnel_send_mask(struct irq_data *d, const struct cpumask *mask)
 
 		/*
 		 * The atomic_fetch_or_release() above must complete before the
-		 * atomic_read() below to avoid racing ipi_funnel_unmask().
+		 * atomic_read() below to avoid racing vipi_unmask().
 		 */
 		smp_mb__after_atomic();
 
@@ -114,11 +114,11 @@ static void ipi_funnel_send_mask(struct irq_data *d, const struct cpumask *mask)
 		ipi_send_mask(ic->hwirq->irq, &sendmask);
 }
 
-static struct irq_chip ipi_funnel_chip = {
+static struct irq_chip vipi_chip = {
 	.name = "IPI",
-	.irq_mask = ipi_funnel_mask,
-	.irq_unmask = ipi_funnel_unmask,
-	.ipi_send_mask = ipi_funnel_send_mask,
+	.irq_mask = vipi_mask,
+	.irq_unmask = vipi_unmask,
+	.ipi_send_mask = vipi_send_mask,
 };
 
 /*
@@ -139,7 +139,7 @@ static void handle_ipi(struct irq_desc *d)
 
 	/*
 	 * Clear the IPIs we are about to handle. This pairs with the
-	 * atomic_fetch_or_release() in ipi_funnel_send_mask(), and needs to be
+	 * atomic_fetch_or_release() in vipi_send_mask(), and needs to be
 	 * ordered after the ic_write() above (to avoid dropping vIPIs) and
 	 * before IPI handling code (to avoid races handling vIPIs before they
 	 * are signaled). The former is taken care of by the release semantics
@@ -150,68 +150,68 @@ static void handle_ipi(struct irq_desc *d)
 
 	for_each_set_bit(i, &firing, NR_SWIPI) {
 		struct irq_desc *nd =
-			irq_resolve_mapping(ipi_funnel_irqc->ipi_funnel_domain, i);
+			irq_resolve_mapping(vipi_irqc->domain, i);
 
 		handle_irq_desc(nd);
 	}
 }
 
-static int ipi_funnel_alloc(struct irq_domain *d, unsigned int virq,
+static int vipi_alloc(struct irq_domain *d, unsigned int virq,
 		     unsigned int nr_irqs, void *args)
 {
 	int i;
 
 	for (i = 0; i < nr_irqs; i++) {
 		irq_set_percpu_devid(virq + i);
-		irq_domain_set_info(d, virq + i, i, &ipi_funnel_chip, d->host_data,
+		irq_domain_set_info(d, virq + i, i, &vipi_chip, d->host_data,
 				    handle_percpu_devid_irq, NULL, NULL);
 	}
 
 	return 0;
 }
 
-static void ipi_funnel_free(struct irq_domain *d, unsigned int virq, unsigned int nr_irqs)
+static void vipi_free(struct irq_domain *d, unsigned int virq, unsigned int nr_irqs)
 {
 	/* Not freeing IPIs */
 	WARN_ON(1);
 }
 
-static const struct irq_domain_ops ipi_funnel_domain_ops = {
-	.alloc = ipi_funnel_alloc,
-	.free = ipi_funnel_free,
+static const struct irq_domain_ops vipi_domain_ops = {
+	.alloc = vipi_alloc,
+	.free = vipi_free,
 };
 
-static int ipi_funnel_init_smp(struct ipi_funnel_irq_chip *irqc)
+static int vipi_init_smp(struct vipi_irq_chip *irqc)
 {
-	struct irq_domain *ipi_funnel_domain;
+	struct irq_domain *vipi_domain;
 	int base_ipi;
 
-	ipi_funnel_domain = irq_domain_create_linear(NULL, NR_SWIPI,
-					      &ipi_funnel_domain_ops, irqc);
-	if (WARN_ON(!ipi_funnel_domain))
+	vipi_domain = irq_domain_create_linear(NULL, NR_SWIPI,
+					      &vipi_domain_ops, irqc);
+	if (WARN_ON(!vipi_domain))
 		return -ENOMEM;
 
-	ipi_funnel_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
-	irq_domain_update_bus_token(ipi_funnel_domain, DOMAIN_BUS_IPI);
+	vipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
+	irq_domain_update_bus_token(vipi_domain, DOMAIN_BUS_IPI);
 
-	base_ipi = __irq_domain_alloc_irqs(ipi_funnel_domain, -1, NR_SWIPI,
+	base_ipi = __irq_domain_alloc_irqs(vipi_domain, -1, NR_SWIPI,
 					   NUMA_NO_NODE, NULL, false, NULL);
 
 	if (WARN_ON(!base_ipi)) {
-		irq_domain_remove(ipi_funnel_domain);
+		irq_domain_remove(vipi_domain);
 		return -ENOMEM;
 	}
 
 	set_smp_ipi_range(base_ipi, NR_SWIPI);
 
-	irqc->ipi_funnel_domain = ipi_funnel_domain;
+	irqc->domain = vipi_domain;
 
 	return 0;
 }
 
-int __init ipi_funnel_init(struct irq_data *hwirq)
+int __init vipi_init(struct irq_data *hwirq)
 {
-	struct ipi_funnel_irq_chip *irqc;
+	struct vipi_irq_chip *irqc;
 
 	irqc = kzalloc(sizeof(*irqc), GFP_KERNEL);
 	if (!irqc)
@@ -219,10 +219,10 @@ int __init ipi_funnel_init(struct irq_data *hwirq)
 
 	irqc->hwirq = hwirq;
 
-	if (ipi_funnel_init_smp(irqc))
+	if (vipi_init_smp(irqc))
 		return -ENOMEM;
 
-	ipi_funnel_irqc = irqc;
+	vipi_irqc = irqc;
 
 	irq_set_handler_locked(hwirq, handle_ipi);
 
