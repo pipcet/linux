@@ -105,7 +105,7 @@ struct aic_irq_chip {
 
 static struct aic_irq_chip *aic_irqc;
 
-static void aic_handle_ipi(struct pt_regs *regs, int index);
+static void aic_handle_ipi(int index, struct pt_regs *regs);
 
 static u32 aic_ic_read(struct aic_irq_chip *ic, u32 reg)
 {
@@ -301,14 +301,19 @@ static const struct irq_domain_ops aic_irq_domain_ops = {
  * IPI irqchip
  */
 
+static int aic_ipi_number(struct irq_data *d)
+{
+	return irqd_to_hwirq(d) ? AIC_IPI_SELF : AIC_IPI_OTHER;
+}
+
 static void aic_ipi_mask(struct irq_data *d)
 {
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_SET, AIC_IPI_OTHER);
+	aic_ic_write(aic_irqc, AIC_IPI_MASK_SET, aic_ipi_number(d));
 }
 
 static void aic_ipi_unmask(struct irq_data *d)
 {
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
+	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, aic_ipi_number(d));
 }
 
 static void aic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
@@ -335,21 +340,24 @@ static struct irq_chip ipi_chip = {
  * IPI IRQ domain
  */
 
-static void aic_handle_ipi(struct pt_regs *regs, int index)
+static void aic_handle_ipi(int index, struct pt_regs *regs)
 {
+	struct irq_domain *domain = aic_irqc->ipi_domain;
+	struct aic_irq_chip *ic = aic_irqc;
 	/*
 	 * Ack the IPI. We need to order this after the AIC event read, but
 	 * that is enforced by normal MMIO ordering guarantees.
 	 */
-	aic_ic_write(aic_irqc, AIC_IPI_ACK, AIC_IPI_OTHER);
+	aic_ic_write(ic, AIC_IPI_ACK,
+		     aic_ipi_number(irq_domain_get_irq_data(domain, index)));
 
-	handle_domain_irq(aic_irqc->ipi_domain, index, regs);
+	handle_domain_irq(domain, index, regs);
 
 	/*
 	 * No ordering needed here; at worst this just changes the timing of
 	 * when the next IPI will be delivered.
 	 */
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
+	aic_ic_write(ic, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
 }
 
 static int aic_ipi_alloc(struct irq_domain *d, unsigned int virq,

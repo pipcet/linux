@@ -22,9 +22,8 @@
 #include <asm/virt.h>
 
 struct vipi_irq_chip {
-	struct irq_domain *vipi_domain;
+	struct irq_domain *domain;
 	struct irq_data *hwirq;
-	void (*send_hwipi)(struct cpumask *);
 };
 
 #define NR_SWIPI 32
