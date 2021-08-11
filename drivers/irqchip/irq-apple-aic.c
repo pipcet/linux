@@ -25,11 +25,11 @@
  *
  * Implementation notes:
  *
- * - This driver creates two IRQ domains, one for HW IRQs and internal FIQs,
- *   and one for IPIs.
- * - Since Linux needs more than 2 IPIs, we implement a software IRQ controller
- *   and funnel all IPIs into one per-CPU IPI (the second "self" IPI is unused).
- * - FIQ hwirq numbers are assigned after true hwirqs, and are per-cpu.
+ * - This driver creates two IRQ domains, one for HW IRQs, and one for
+ *   the single IPI we actually support.
+ * - Since Linux needs more than 2 IPIs, we rely on the arch IRQ layer
+ *   to funnel IPIs through its own implementation, using just one
+ *   per-CPU real IPI (the second "self" IPI is unused).
  * - DT bindings use 3-cell form (like GIC):
  *   - <0 nr flags> - hwirq #nr
  */
@@ -102,10 +102,11 @@ struct aic_irq_chip {
 	int nr_hw;
 };
 
+#define AIC_NR_IPI 1
 
 static struct aic_irq_chip *aic_irqc;
 
-static void aic_handle_ipi(struct pt_regs *regs);
+static void aic_handle_ipi(int index, struct pt_regs *regs);
 
 static u32 aic_ic_read(struct aic_irq_chip *ic, u32 reg)
 {
@@ -300,70 +301,30 @@ static const struct irq_domain_ops aic_irq_domain_ops = {
  * IPI irqchip
  */
 
+static int aic_ipi_number(struct irq_data *d)
+{
+	return irqd_to_hwirq(d) ? AIC_IPI_OTHER : AIC_IPI_OTHER;
+}
+
 static void aic_ipi_mask(struct irq_data *d)
 {
-	u32 irq_bit = BIT(irqd_to_hwirq(d));
-
-	/* No specific ordering requirements needed here. */
-	atomic_andnot(irq_bit, this_cpu_ptr(&aic_vipi_enable));
+	aic_ic_write(aic_irqc, AIC_IPI_MASK_SET, aic_ipi_number(d));
 }
 
 static void aic_ipi_unmask(struct irq_data *d)
 {
-	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
-	u32 irq_bit = BIT(irqd_to_hwirq(d));
-
-	atomic_or(irq_bit, this_cpu_ptr(&aic_vipi_enable));
-
-	/*
-	 * The atomic_or() above must complete before the atomic_read()
-	 * below to avoid racing aic_ipi_send_mask().
-	 */
-	smp_mb__after_atomic();
-
-	/*
-	 * If a pending vIPI was unmasked, raise a HW IPI to ourselves.
-	 * No barriers needed here since this is a self-IPI.
-	 */
-	if (atomic_read(this_cpu_ptr(&aic_vipi_flag)) & irq_bit)
-		aic_ic_write(ic, AIC_IPI_SEND, AIC_IPI_SEND_CPU(smp_processor_id()));
+	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, aic_ipi_number(d));
 }
 
 static void aic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 {
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
-	u32 irq_bit = BIT(irqd_to_hwirq(d));
 	u32 send = 0;
 	int cpu;
-	unsigned long pending;
 
-	for_each_cpu(cpu, mask) {
-		/*
-		 * This sequence is the mirror of the one in aic_ipi_unmask();
-		 * see the comment there. Additionally, release semantics
-		 * ensure that the vIPI flag set is ordered after any shared
-		 * memory accesses that precede it. This therefore also pairs
-		 * with the atomic_fetch_andnot in aic_handle_ipi().
-		 */
-		pending = atomic_fetch_or_release(irq_bit, per_cpu_ptr(&aic_vipi_flag, cpu));
+	for_each_cpu(cpu, mask)
+		send |= AIC_IPI_SEND_CPU(cpu);
 
-		/*
-		 * The atomic_fetch_or_release() above must complete before the
-		 * atomic_read() below to avoid racing aic_ipi_unmask().
-		 */
-		smp_mb__after_atomic();
-
-		if (!(pending & irq_bit) &&
-		    (atomic_read(per_cpu_ptr(&aic_vipi_enable, cpu)) & irq_bit))
-			send |= AIC_IPI_SEND_CPU(cpu);
-	}
-
-	/*
-	 * The flag writes must complete before the physical IPI is issued
-	 * to another CPU. This is implied by the control dependency on
-	 * the result of atomic_read_acquire() above, which is itself
-	 * already ordered after the vIPI flag write.
-	 */
 	if (send)
 		aic_ic_write(ic, AIC_IPI_SEND, send);
 }
@@ -379,44 +340,24 @@ static struct irq_chip ipi_chip = {
  * IPI IRQ domain
  */
 
-static void aic_handle_ipi(struct pt_regs *regs)
+static void aic_handle_ipi(int index, struct pt_regs *regs)
 {
-	int i;
-	unsigned long enabled, firing;
-
+	struct irq_domain *domain = aic_irqc->ipi_domain;
+	struct aic_irq_chip *ic = aic_irqc;
 	/*
 	 * Ack the IPI. We need to order this after the AIC event read, but
 	 * that is enforced by normal MMIO ordering guarantees.
 	 */
-	aic_ic_write(aic_irqc, AIC_IPI_ACK, AIC_IPI_OTHER);
+	aic_ic_write(ic, AIC_IPI_ACK,
+		     aic_ipi_number(irq_domain_get_irq_data(domain, index)));
 
-	/*
-	 * The mask read does not need to be ordered. Only we can change
-	 * our own mask anyway, so no races are possible here, as long as
-	 * we are properly in the interrupt handler (which is covered by
-	 * the barrier that is part of the top-level AIC handler's readl()).
-	 */
-	enabled = atomic_read(this_cpu_ptr(&aic_vipi_enable));
-
-	/*
-	 * Clear the IPIs we are about to handle. This pairs with the
-	 * atomic_fetch_or_release() in aic_ipi_send_mask(), and needs to be
-	 * ordered after the aic_ic_write() above (to avoid dropping vIPIs) and
-	 * before IPI handling code (to avoid races handling vIPIs before they
-	 * are signaled). The former is taken care of by the release semantics
-	 * of the write portion, while the latter is taken care of by the
-	 * acquire semantics of the read portion.
-	 */
-	firing = atomic_fetch_andnot(enabled, this_cpu_ptr(&aic_vipi_flag)) & enabled;
-
-	for_each_set_bit(i, &firing, AIC_NR_SWIPI)
-		handle_domain_irq(aic_irqc->ipi_domain, i, regs);
+	handle_domain_irq(domain, index, regs);
 
 	/*
 	 * No ordering needed here; at worst this just changes the timing of
 	 * when the next IPI will be delivered.
 	 */
-	aic_ic_write(aic_irqc, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
+	aic_ic_write(ic, AIC_IPI_MASK_CLR, AIC_IPI_OTHER);
 }
 
 static int aic_ipi_alloc(struct irq_domain *d, unsigned int virq,
@@ -448,7 +389,7 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 	struct irq_domain *ipi_domain;
 	int base_ipi;
 
-	ipi_domain = irq_domain_create_linear(irqc->hw_domain->fwnode, AIC_NR_SWIPI,
+	ipi_domain = irq_domain_create_linear(irqc->hw_domain->fwnode, AIC_NR_IPI,
 					      &aic_ipi_domain_ops, irqc);
 	if (WARN_ON(!ipi_domain))
 		return -ENODEV;
@@ -456,7 +397,7 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 	ipi_domain->flags |= IRQ_DOMAIN_FLAG_IPI_SINGLE;
 	irq_domain_update_bus_token(ipi_domain, DOMAIN_BUS_IPI);
 
-	base_ipi = __irq_domain_alloc_irqs(ipi_domain, -1, AIC_NR_SWIPI,
+	base_ipi = __irq_domain_alloc_irqs(ipi_domain, -1, AIC_NR_IPI,
 					   NUMA_NO_NODE, NULL, false, NULL);
 
 	if (WARN_ON(base_ipi < 0)) {
@@ -464,7 +405,7 @@ static int aic_init_smp(struct aic_irq_chip *irqc, struct device_node *node)
 		return -ENODEV;
 	}
 
-	set_smp_ipi_range(base_ipi, AIC_NR_SWIPI);
+	set_smp_ipi_range(base_ipi, AIC_NR_IPI);
 
 	irqc->ipi_domain = ipi_domain;
 
@@ -514,6 +455,7 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	void __iomem *regs;
 	u32 info;
 	struct aic_irq_chip *irqc;
+	bool use_for_ipi = of_property_read_bool(node, "use-for-ipi");
 
 	regs = of_iomap(node, 0);
 	if (WARN_ON(!regs))
@@ -540,7 +482,7 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 
 	irq_domain_update_bus_token(irqc->hw_domain, DOMAIN_BUS_WIRED);
 
-	if (aic_init_smp(irqc, node)) {
+	if (use_for_ipi && aic_init_smp(irqc, node)) {
 		irq_domain_remove(irqc->hw_domain);
 		iounmap(irqc->base);
 		kfree(irqc);
