@@ -315,7 +315,7 @@ static int irq_domain_translate(struct irq_domain *id,
 }
 
 static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
-				unsigned int nr_irqs, void *arg)
+			    unsigned int nr_irqs, void *arg)
 {
 	unsigned int type = IRQ_TYPE_NONE;
 	struct irq_fwspec *fwspec = arg;
@@ -336,7 +336,7 @@ static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 }
 
 static void irq_domain_free(struct irq_domain *domain, unsigned int virq,
-				unsigned int nr_irqs)
+			    unsigned int nr_irqs)
 {
 	int i;
 
@@ -356,7 +356,7 @@ static const struct irq_domain_ops irq_domain_ops = {
 
 int fiq_init_cpu(unsigned int cpu)
 {
-	/* Mask all hard-wired per-CPU IRQ/FIQ sources */
+	/* Mask all hard-wired per-CPU FIQ sources */
 
 	/* Pending Fast IPI FIQs */
 	write_sysreg_s(IPI_SR_PENDING, SYS_IMP_APL_IPI_SR_EL1);
