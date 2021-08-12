@@ -355,6 +355,15 @@ config APPLE_M1_ASC_SYSLOG
 
 	  Say Y here if you see this option.
 
+config APPLE_M1_ASC_IOREPORT
+        tristate "Apple M1 ASC I/O Report endpoint support"
+	depends_on APPLE APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Say Y here if you see this option.
+
 endif # REMOTEPROC
 
 endmenu
