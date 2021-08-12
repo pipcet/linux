@@ -326,6 +326,17 @@ config APPLE_M1_ASC
 
 	  Say Y here if you're on such a system.
 
+config APPLE_M1_ASC_PANIC
+        tristate "Apple M1 ASC panic endpoint support"
+	depends_on APPLE APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Note that the coprocessors will not work without this driver being enabled.
+
+	  Say Y here if you see this option.
+
 endif # REMOTEPROC
 
 endmenu
