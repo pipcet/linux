@@ -8,6 +8,16 @@ menuconfig MAILBOX
 
 if MAILBOX
 
+config APPLE_M1_MAILBOX
+        bool "Apple M1 hardware mailbox"
+	depends on ARM && APPLE
+	help
+	  Support for the single-channel hardware mailbox found in
+	  Apple M1 SoCs. Note that this driver by itself does not
+	  enable any user-visible features.
+
+	  Say Y here if you have such a system.
+
 config ARM_MHU
 	tristate "ARM MHU Mailbox"
 	depends on ARM_AMBA
