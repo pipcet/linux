@@ -10,6 +10,7 @@
 #include <linux/errno.h>
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
+#include <linux/module.h>
 #include <linux/platform_data/x86/apple.h>
 
 #include "tb.h"
@@ -1076,6 +1077,9 @@ static int tb_tunnel_pci(struct tb *tb, struct tb_switch *sw)
 		return -EIO;
 	}
 
+	if(tb_route(down->sw) == 0)
+		nhi_notify_pci_tunnel(tb->nhi, down->port);
+
 	list_add_tail(&tunnel->list, &tcm->tunnel_list);
 	return 0;
 }
@@ -1663,3 +1667,6 @@ struct tb *tb_probe(struct tb_nhi *nhi)
 
 	return tb;
 }
+EXPORT_SYMBOL_GPL(tb_probe);
+
+MODULE_LICENSE("GPL");

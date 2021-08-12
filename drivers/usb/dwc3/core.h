@@ -977,6 +977,7 @@ struct dwc3_scratchpad_array {
  * @nr_scratch: number of scratch buffers
  * @u1u2: only used on revisions <1.83a for workaround
  * @maximum_speed: maximum speed requested (mainly for testing purposes)
+ * @dma_mask_bits: bits in device's DMA mask (default 32)
  * @max_ssp_rate: SuperSpeed Plus maximum signaling rate and lane count
  * @gadget_max_speed: maximum gadget speed requested
  * @gadget_ssp_rate: Gadget driver's maximum supported SuperSpeed Plus signaling
@@ -1149,6 +1150,7 @@ struct dwc3 {
 	u32			nr_scratch;
 	u32			u1u2;
 	u32			maximum_speed;
+	u32			dma_mask_bits;
 	u32			gadget_max_speed;
 	enum usb_ssp_rate	max_ssp_rate;
 	enum usb_ssp_rate	gadget_ssp_rate;
