@@ -36,8 +36,6 @@
 
 static int apple_dcp_probe(struct platform_device *pdev)
 {
-	struct resource *res;
-	struct apple_dart *dart;
 	struct device *dev = &pdev->dev;
 	void *is_it_that_simple;
 	dma_addr_t dmah;
@@ -48,7 +46,7 @@ static int apple_dcp_probe(struct platform_device *pdev)
 						       &dmah, GFP_KERNEL);
 		size <<= 2;
 
-		printk("is it that simple? %016lx+%016lx %016lx\n", is_it_that_simple, size, dmah);
+		printk("is it that simple? %016llx+%016llx %016llx\n", (u64)is_it_that_simple, size, dmah);
 	} while (is_it_that_simple);
 
 	return -ENODEV;
