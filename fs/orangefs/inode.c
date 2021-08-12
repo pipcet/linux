@@ -703,6 +703,7 @@ out:
 /** ORANGEFS2 implementation of address space operations */
 static const struct address_space_operations orangefs_address_operations = {
 	.writepage = orangefs_writepage,
+	.readahead = orangefs_readahead,
 	.readpage = orangefs_readpage,
 	.writepages = orangefs_writepages,
 	.set_page_dirty = __set_page_dirty_nobuffers,

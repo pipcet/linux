@@ -995,11 +995,7 @@ grow_buffers(struct block_device *bdev, sector_t block, int size, gfp_t gfp)
 	pgoff_t index;
 	int sizebits;
 
-	sizebits = -1;
-	do {
-		sizebits++;
-	} while ((size << sizebits) < PAGE_SIZE);
-
+	sizebits = PAGE_SHIFT - __ffs(size);
 	index = block >> sizebits;
 
 	/*
@@ -2950,7 +2946,7 @@ EXPORT_SYMBOL(block_truncate_page);
  * The generic ->writepage function for buffer-backed address_spaces
  */
 int block_write_full_page(struct page *page, get_block_t *get_block,
-			  struct writeback_control *wbc)
+			struct writeback_control *wbc)
 {
 	struct inode * const inode = page->mapping->host;
 	loff_t i_size = i_size_read(inode);
@@ -2978,7 +2974,7 @@ int block_write_full_page(struct page *page, get_block_t *get_block,
 	 */
 	zero_user_segment(page, offset, PAGE_SIZE);
 	return __block_write_full_page(inode, page, get_block, wbc,
-				       end_buffer_async_write);
+							end_buffer_async_write);
 }
 EXPORT_SYMBOL(block_write_full_page);
 

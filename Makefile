@@ -1733,7 +1733,7 @@ build-dirs := $(KBUILD_EXTMOD)
 $(MODORDER): descend
 	@:
 
-compile_commands.json: $(extmod-prefix)compile_commands.json
+compile_commands.json: $(extmod_prefix)compile_commands.json
 PHONY += compile_commands.json
 
 clean-dirs := $(KBUILD_EXTMOD)

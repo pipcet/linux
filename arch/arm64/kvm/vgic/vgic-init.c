@@ -525,15 +525,6 @@ int kvm_vgic_hyp_init(void)
 	if (!gic_kvm_info)
 		return -ENODEV;
 
-	/*
-	 * If we get one of these oddball non-GICs, taint the kernel,
-	 * as we have no idea of how they *really* behave.
-	 */
-	if (gic_kvm_info->no_hw_deactivation) {
-		kvm_info("Non-architectural vgic, tainting kernel\n");
-		add_taint(TAINT_CPU_OUT_OF_SPEC, LOCKDEP_STILL_OK);
-		kvm_vgic_global_state.no_hw_deactivation = true;
-	}
 	has_mask = !gic_kvm_info->no_maint_irq_mask;
 
 	if (has_mask && !gic_kvm_info->maint_irq) {
@@ -574,10 +565,6 @@ int kvm_vgic_hyp_init(void)
 	if (ret)
 		return ret;
 
-	if (!kvm_vgic_global_state.maint_irq) {
-		kvm_err("No maintenance interrupt available, fingers crossed...\n");
-		return 0;
-	}
 	if (!has_mask)
 		return 0;
 

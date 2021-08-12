@@ -1312,19 +1312,6 @@ source "usr/Kconfig"
 
 endif
 
-config BUILTIN_DEVICE_TREE_TEMPLATE
-        bool "Built-in device tree template"
-	help
-	  Override the device tree with a built-in template.
-
-          If unsure, say N.
-
-config DEVICE_TREE_TEMPLATE
-	string "DT template source file"
-	default ""
-	help
-	  If you are not sure, leave it blank.
-
 config BOOT_CONFIG
 	bool "Boot config support"
 	select BLK_DEV_INITRD

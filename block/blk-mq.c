@@ -2282,7 +2282,7 @@ blk_qc_t blk_mq_submit_bio(struct bio *bio)
 			data.hctx = same_queue_rq->mq_hctx;
 			trace_block_unplug(q, 1, true);
 			blk_mq_try_issue_directly(data.hctx, same_queue_rq,
-						  &cookie);
+					&cookie);
 		}
 	} else if ((q->nr_hw_queues > 1 && is_sync) ||
 			!data.hctx->dispatch_busy) {

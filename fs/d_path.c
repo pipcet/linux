@@ -309,7 +309,7 @@ restart:
 	b = *p;
 	read_seqbegin_or_lock(&rename_lock, &seq);
 	while (!IS_ROOT(dentry)) {
-		struct dentry *parent = dentry->d_parent;
+		const struct dentry *parent = dentry->d_parent;
 
 		prefetch(parent);
 		if (!prepend_name(&b, &dentry->d_name))
@@ -328,7 +328,7 @@ restart:
 	return extract_string(&b);
 }
 
-char *dentry_path_raw(struct dentry *dentry, char *buf, int buflen)
+char *dentry_path_raw(const struct dentry *dentry, char *buf, int buflen)
 {
 	DECLARE_BUFFER(b, buf, buflen);
 
@@ -337,7 +337,7 @@ char *dentry_path_raw(struct dentry *dentry, char *buf, int buflen)
 }
 EXPORT_SYMBOL(dentry_path_raw);
 
-char *dentry_path(struct dentry *dentry, char *buf, int buflen)
+char *dentry_path(const struct dentry *dentry, char *buf, int buflen)
 {
 	DECLARE_BUFFER(b, buf, buflen);
 

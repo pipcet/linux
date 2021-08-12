@@ -307,9 +307,6 @@ struct dentry *debugfs_lookup(const char *name, struct dentry *parent)
 	if (!parent)
 		parent = debugfs_mount->mnt_root;
 
-	if (!parent)
-		return NULL;
-
 	dentry = lookup_positive_unlocked(name, parent, strlen(name));
 	if (IS_ERR(dentry))
 		return NULL;
@@ -347,9 +344,6 @@ static struct dentry *start_creating(const char *name, struct dentry *parent)
 	 */
 	if (!parent)
 		parent = debugfs_mount->mnt_root;
-
-	if (!parent)
-		return ERR_PTR(-ENOENT);
 
 	inode_lock(d_inode(parent));
 	if (unlikely(IS_DEADDIR(d_inode(parent))))

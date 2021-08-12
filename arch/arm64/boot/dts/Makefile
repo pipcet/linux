@@ -5,7 +5,6 @@ subdir-y += altera
 subdir-y += amazon
 subdir-y += amd
 subdir-y += amlogic
-subdir-y += apple
 subdir-y += apm
 subdir-y += apple
 subdir-y += arm

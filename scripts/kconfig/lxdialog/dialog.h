@@ -187,13 +187,13 @@ int on_key_resize(void);
 #define INPUTBOX_HEIGTH_MIN 2	/* For dialog_inputbox() */
 #define INPUTBOX_WIDTH_MIN 2
 #define MENUBOX_HEIGTH_MIN 15	/* For dialog_menu() */
-#define MENUBOX_WIDTH_MIN 60
+#define MENUBOX_WIDTH_MIN 65
 #define TEXTBOX_HEIGTH_MIN 8	/* For dialog_textbox() */
 #define TEXTBOX_WIDTH_MIN 8
 #define YESNO_HEIGTH_MIN 4	/* For dialog_yesno() */
 #define YESNO_WIDTH_MIN 4
 #define WINDOW_HEIGTH_MIN 19	/* For init_dialog() */
-#define WINDOW_WIDTH_MIN 70
+#define WINDOW_WIDTH_MIN 80
 
 int init_dialog(const char *backtitle);
 void set_dialog_backtitle(const char *backtitle);

@@ -1058,8 +1058,6 @@ static void kvm_irq_fixup_flags(unsigned int virq, u32 *flags)
 static int kvm_irq_init(struct arch_timer_kvm_info *info)
 {
 	struct irq_domain *domain = NULL;
-	struct fwnode_handle *fwnode;
-	struct irq_data *data;
 
 	if (info->virtual_irq <= 0) {
 		kvm_err("kvm_arch_timer: invalid virtual timer IRQ: %d\n",

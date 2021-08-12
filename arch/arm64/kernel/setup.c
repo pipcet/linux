@@ -337,6 +337,9 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 			"The dtb must be 8-byte aligned and must not exceed 2 MB in size\n"
 			"\nPlease check your bootloader.",
 			&dt_phys, dt_virt);
+
+		while (true)
+			cpu_relax();
 	}
 
 	/* Early fixups are done, map the FDT as read-only now */
