@@ -397,6 +397,13 @@ config COMMON_CLK_APPLE_M1_PMGR
 	help
 	  Support for the power manager gates on Apple M1 devices.
 
+config COMMON_CLK_APPLE_M1_CIO
+	bool "Clock driver for Apple M1 CIO clocks"
+	depends on ARCH_APPLE
+	default ARCH_APPLE
+	help
+	  Support for the CIO clocks on Apple M1 devices.
+
 source "drivers/clk/actions/Kconfig"
 source "drivers/clk/analogbits/Kconfig"
 source "drivers/clk/baikal-t1/Kconfig"
