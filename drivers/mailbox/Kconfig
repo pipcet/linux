@@ -8,6 +8,14 @@ menuconfig MAILBOX
 
 if MAILBOX
 
+config KVBOX
+        bool "Key-Value Hardware Support"
+	help
+          Key-Value boxes are a variant of mailbox with many
+	  individual properties, rather than a few independent channels.
+
+	  Say Y if your platform has one of these.
+
 config APPLE_M1_MAILBOX
         bool "Apple M1 hardware mailbox"
 	depends on ARM && APPLE
