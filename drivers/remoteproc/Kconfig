@@ -315,6 +315,17 @@ config TI_K3_R5_REMOTEPROC
 	  It's safe to say N here if you're not interested in utilizing
 	  a slave processor.
 
+config APPLE_M1_ASC
+        tristate "Apple M1 ASC/IOP/RTKit coprocessor support"
+	depends_on APPLE
+	help
+	  Support Apple M1 coprocessors using the remoteproc
+	  interface. Note that this driver only provides mailboxes for
+	  other drivers to use and does not provide any user-visible
+	  features by itself.
+
+	  Say Y here if you're on such a system.
+
 endif # REMOTEPROC
 
 endmenu
