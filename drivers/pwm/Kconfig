@@ -51,6 +51,16 @@ config PWM_AB8500
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-ab8500.
 
+config PWM_APPLE_M1
+       tristate "Apple M1 FPWM support"
+       	depends on ARCH_APPLE
+	help
+	  PWM driver for the Apple M1's FPWM (which controls the
+	  keyboard backlight in some MacBook Pros)
+
+	  To compile this driver as a module, choose M here; the module
+	  will be called pwm-apple-m1-fpwm.
+
 config PWM_ATMEL
 	tristate "Atmel PWM support"
 	depends on ARCH_AT91 || COMPILE_TEST

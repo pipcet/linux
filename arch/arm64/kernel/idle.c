@@ -10,6 +10,7 @@
 #include <asm/cpuidle.h>
 #include <asm/cpufeature.h>
 #include <asm/sysreg.h>
+#include <asm/cpu_ops.h>
 
 /*
  *	cpu_do_idle()
@@ -26,8 +27,14 @@ void noinstr cpu_do_idle(void)
 
 	arm_cpuidle_save_irq_context(&context);
 
-	dsb(sy);
-	wfi();
+	const struct cpu_operations *ops = get_cpu_ops(task_cpu(current));
+
+	if (ops->cpu_wfi) {
+		ops->cpu_wfi();
+	} else {
+		dsb(sy);
+		wfi();
+	}
 
 	arm_cpuidle_restore_irq_context(&context);
 }

@@ -232,9 +232,6 @@ void dwc3_set_mode(struct dwc3 *dwc, u32 mode)
 {
 	unsigned long flags;
 
-	if (dwc->dr_mode != USB_DR_MODE_OTG)
-		return;
-
 	spin_lock_irqsave(&dwc->lock, flags);
 	dwc->desired_dr_role = mode;
 	spin_unlock_irqrestore(&dwc->lock, flags);
@@ -768,6 +765,7 @@ static bool dwc3_core_is_valid(struct dwc3 *dwc)
 		dwc->revision = dwc3_readl(dwc->regs, DWC3_VER_NUMBER);
 		dwc->version_type = dwc3_readl(dwc->regs, DWC3_VER_TYPE);
 	} else {
+		dwc->revision = reg;
 		return false;
 	}
 
@@ -1282,6 +1280,9 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 	 */
 	hird_threshold = 12;
 
+	if(device_property_read_u32(dev, "linux,dma_mask_bits", &dwc->dma_mask_bits) < 0)
+		dwc->dma_mask_bits = 32;
+
 	dwc->maximum_speed = usb_get_maximum_speed(dev);
 	dwc->max_ssp_rate = usb_get_maximum_ssp_rate(dev);
 	dwc->dr_mode = usb_get_dr_mode(dev);
@@ -1545,7 +1546,7 @@ static int dwc3_probe(struct platform_device *pdev)
 
 	dwc3_get_properties(dwc);
 
-	ret = dma_set_mask_and_coherent(dwc->sysdev, DMA_BIT_MASK(64));
+        ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(dwc->dma_mask_bits));
 	if (ret)
 		return ret;
 
@@ -1577,9 +1578,7 @@ static int dwc3_probe(struct platform_device *pdev)
 		goto assert_reset;
 
 	if (!dwc3_core_is_valid(dwc)) {
-		dev_err(dwc->dev, "this is not a DesignWare USB3 DRD Core\n");
-		ret = -ENODEV;
-		goto disable_clks;
+		printk("doesn't appear to be valid, continuing ...");
 	}
 
 	platform_set_drvdata(pdev, dwc);

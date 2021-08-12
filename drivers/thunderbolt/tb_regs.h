@@ -31,6 +31,7 @@ enum tb_switch_cap {
 };
 
 enum tb_switch_vse_cap {
+	TB_VSE_CAP_VSC0			= 0x00,
 	TB_VSE_CAP_PLUG_EVENTS		= 0x01, /* also EEPROM */
 	TB_VSE_CAP_TIME2		= 0x03,
 	TB_VSE_CAP_IECS			= 0x04,

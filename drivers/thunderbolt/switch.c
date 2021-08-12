@@ -252,6 +252,9 @@ static void nvm_authenticate_start_dma_port(struct tb_switch *sw)
 {
 	struct pci_dev *root_port;
 
+	if(!sw->tb->nhi->pdev)
+		return;
+
 	/*
 	 * During host router NVM upgrade we should not allow root port to
 	 * go into D3cold because some root ports cannot trigger PME
@@ -266,6 +269,9 @@ static void nvm_authenticate_start_dma_port(struct tb_switch *sw)
 static void nvm_authenticate_complete_dma_port(struct tb_switch *sw)
 {
 	struct pci_dev *root_port;
+
+	if(!sw->tb->nhi->pdev)
+		return;
 
 	root_port = pcie_find_root_port(sw->tb->nhi->pdev);
 	if (root_port)
@@ -724,15 +730,21 @@ static int tb_init_port(struct tb_port *port)
 	int res;
 	int cap;
 
-	res = tb_port_read(port, &port->config, TB_CFG_PORT, 0, 8);
-	if (res) {
-		if (res == -ENODEV) {
-			tb_dbg(port->sw->tb, " Port %d: not implemented\n",
-			       port->port);
-			port->disabled = true;
-			return 0;
+	if (tb_route(port->sw) == 0 && port->port == 0 &&
+	    (port->sw->tb->nhi->quirks & NHI_QUIRK_NO_HOST_ADAPTER_0)) {
+		/* Host Control Adapter space is not readable on this device */
+		memset(&port->config, 0, 8);
+	} else {
+		res = tb_port_read(port, &port->config, TB_CFG_PORT, 0, 8);
+		if (res) {
+			if (res == -ENODEV) {
+				tb_dbg(port->sw->tb, " Port %d: not implemented\n",
+				       port->port);
+				port->disabled = true;
+				return 0;
+			}
+			return res;
 		}
-		return res;
 	}
 
 	/* Port 0 is the switch itself and has no PHY. */
@@ -963,6 +975,23 @@ int tb_port_get_link_width(struct tb_port *port)
 		LANE_ADP_CS_1_CURRENT_WIDTH_SHIFT;
 }
 
+int tb_port_get_link_bond(struct tb_port *port)
+{
+	u32 val;
+	int ret;
+
+	if (!port->cap_phy)
+		return -EINVAL;
+
+	ret = tb_port_read(port, &val, TB_CFG_PORT,
+			   port->cap_phy + LANE_ADP_CS_1, 1);
+	if (ret)
+		return ret;
+
+	return (val & LANE_ADP_CS_1_TARGET_WIDTH_MASK) ==
+		(LANE_ADP_CS_1_TARGET_WIDTH_DUAL << LANE_ADP_CS_1_TARGET_WIDTH_SHIFT);
+}
+
 static bool tb_port_is_width_supported(struct tb_port *port, int width)
 {
 	u32 phy, widths;
@@ -1029,21 +1058,23 @@ static int tb_port_set_link_width(struct tb_port *port, unsigned int width)
  */
 int tb_port_lane_bonding_enable(struct tb_port *port)
 {
-	int ret;
+	int ret, ret2;
 
 	/*
 	 * Enable lane bonding for both links if not already enabled by
 	 * for example the boot firmware.
 	 */
 	ret = tb_port_get_link_width(port);
-	if (ret == 1) {
+	ret2 = tb_port_get_link_bond(port);
+	if (ret == 1 || ret2 == 0) {
 		ret = tb_port_set_link_width(port, 2);
 		if (ret)
 			return ret;
 	}
 
 	ret = tb_port_get_link_width(port->dual_link_port);
-	if (ret == 1) {
+	ret2 = tb_port_get_link_bond(port);
+	if (ret == 1 || ret2 == 0) {
 		ret = tb_port_set_link_width(port->dual_link_port, 2);
 		if (ret) {
 			tb_port_set_link_width(port, 1);
@@ -2031,6 +2062,7 @@ struct device_type tb_switch_type = {
 	.uevent = tb_switch_uevent,
 	.pm = &tb_switch_pm_ops,
 };
+EXPORT_SYMBOL_GPL(tb_switch_type);
 
 static int tb_switch_get_generation(struct tb_switch *sw)
 {
@@ -2172,6 +2204,10 @@ struct tb_switch *tb_switch_alloc(struct tb *tb, struct device *parent,
 		}
 	}
 
+	ret = tb_switch_find_vse_cap(sw, TB_VSE_CAP_VSC0);
+	if (ret > 0)
+		sw->cap_vsc0 = ret;
+
 	ret = tb_switch_find_vse_cap(sw, TB_VSE_CAP_PLUG_EVENTS);
 	if (ret > 0)
 		sw->cap_plug_events = ret;
@@ -2295,6 +2331,12 @@ int tb_switch_configure(struct tb_switch *sw)
 	}
 	if (ret)
 		return ret;
+
+	if (tb_route(sw) == 0) {
+		struct tb_nhi *nhi = sw->tb->nhi;
+		if (nhi->ops && nhi->ops->attach_host_switch)
+			nhi->ops->attach_host_switch(sw, 1);
+	}
 
 	return tb_plug_events_active(sw, true);
 }

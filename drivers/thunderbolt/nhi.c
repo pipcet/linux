@@ -270,7 +270,7 @@ invoke_callback:
 	}
 }
 
-int __tb_ring_enqueue(struct tb_ring *ring, struct ring_frame *frame)
+int pci_nhi_ring_enqueue(struct tb_ring *ring, struct ring_frame *frame)
 {
 	unsigned long flags;
 	int ret = 0;
@@ -285,7 +285,6 @@ int __tb_ring_enqueue(struct tb_ring *ring, struct ring_frame *frame)
 	spin_unlock_irqrestore(&ring->lock, flags);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(__tb_ring_enqueue);
 
 /**
  * tb_ring_poll() - Poll one completed frame from the ring
@@ -296,7 +295,7 @@ EXPORT_SYMBOL_GPL(__tb_ring_enqueue);
  * return it to the caller. Returns %NULL if there is no more completed
  * frames.
  */
-struct ring_frame *tb_ring_poll(struct tb_ring *ring)
+struct ring_frame *pci_nhi_ring_poll(struct tb_ring *ring)
 {
 	struct ring_frame *frame = NULL;
 	unsigned long flags;
@@ -326,7 +325,6 @@ unlock:
 	spin_unlock_irqrestore(&ring->lock, flags);
 	return frame;
 }
-EXPORT_SYMBOL_GPL(tb_ring_poll);
 
 static void __ring_interrupt_mask(struct tb_ring *ring, bool mask)
 {
@@ -364,7 +362,7 @@ static void __ring_interrupt(struct tb_ring *ring)
  * This will re-start (unmask) the ring interrupt once the user is done
  * with polling.
  */
-void tb_ring_poll_complete(struct tb_ring *ring)
+void pci_nhi_ring_poll_complete(struct tb_ring *ring)
 {
 	unsigned long flags;
 
@@ -375,7 +373,6 @@ void tb_ring_poll_complete(struct tb_ring *ring)
 	spin_unlock(&ring->lock);
 	spin_unlock_irqrestore(&ring->nhi->lock, flags);
 }
-EXPORT_SYMBOL_GPL(tb_ring_poll_complete);
 
 static irqreturn_t ring_msix(int irq, void *data)
 {
@@ -558,12 +555,11 @@ err_free_ring:
  * @size: Number of entries in the ring
  * @flags: Flags for the ring
  */
-struct tb_ring *tb_ring_alloc_tx(struct tb_nhi *nhi, int hop, int size,
+struct tb_ring *pci_nhi_ring_alloc_tx(struct tb_nhi *nhi, int hop, int size,
 				 unsigned int flags)
 {
 	return tb_ring_alloc(nhi, hop, size, true, flags, 0, 0, 0, NULL, NULL);
 }
-EXPORT_SYMBOL_GPL(tb_ring_alloc_tx);
 
 /**
  * tb_ring_alloc_rx() - Allocate DMA ring for receive
@@ -579,7 +575,7 @@ EXPORT_SYMBOL_GPL(tb_ring_alloc_tx);
  *		in each Rx frame.
  * @poll_data: Optional data passed to @start_poll
  */
-struct tb_ring *tb_ring_alloc_rx(struct tb_nhi *nhi, int hop, int size,
+struct tb_ring *pci_nhi_ring_alloc_rx(struct tb_nhi *nhi, int hop, int size,
 				 unsigned int flags, int e2e_tx_hop,
 				 u16 sof_mask, u16 eof_mask,
 				 void (*start_poll)(void *), void *poll_data)
@@ -587,7 +583,6 @@ struct tb_ring *tb_ring_alloc_rx(struct tb_nhi *nhi, int hop, int size,
 	return tb_ring_alloc(nhi, hop, size, false, flags, e2e_tx_hop, sof_mask, eof_mask,
 			     start_poll, poll_data);
 }
-EXPORT_SYMBOL_GPL(tb_ring_alloc_rx);
 
 /**
  * tb_ring_start() - enable a ring
@@ -595,7 +590,7 @@ EXPORT_SYMBOL_GPL(tb_ring_alloc_rx);
  *
  * Must not be invoked in parallel with tb_ring_stop().
  */
-void tb_ring_start(struct tb_ring *ring)
+void pci_nhi_ring_start(struct tb_ring *ring)
 {
 	u16 frame_size;
 	u32 flags;
@@ -663,7 +658,6 @@ err:
 	spin_unlock(&ring->lock);
 	spin_unlock_irq(&ring->nhi->lock);
 }
-EXPORT_SYMBOL_GPL(tb_ring_start);
 
 /**
  * tb_ring_stop() - shutdown a ring
@@ -679,7 +673,7 @@ EXPORT_SYMBOL_GPL(tb_ring_start);
  * with frame->canceled set to true (on the callback thread). This method
  * returns only after all callback invocations have finished.
  */
-void tb_ring_stop(struct tb_ring *ring)
+void pci_nhi_ring_stop(struct tb_ring *ring)
 {
 	spin_lock_irq(&ring->nhi->lock);
 	spin_lock(&ring->lock);
@@ -712,7 +706,6 @@ err:
 	schedule_work(&ring->work);
 	flush_work(&ring->work);
 }
-EXPORT_SYMBOL_GPL(tb_ring_stop);
 
 /*
  * tb_ring_free() - free ring
@@ -724,7 +717,7 @@ EXPORT_SYMBOL_GPL(tb_ring_stop);
  *
  * Must NOT be called from ring_frame->callback!
  */
-void tb_ring_free(struct tb_ring *ring)
+void pci_nhi_ring_free(struct tb_ring *ring)
 {
 	spin_lock_irq(&ring->nhi->lock);
 	/*
@@ -763,7 +756,6 @@ void tb_ring_free(struct tb_ring *ring)
 	flush_work(&ring->work);
 	kfree(ring);
 }
-EXPORT_SYMBOL_GPL(tb_ring_free);
 
 /**
  * nhi_mailbox_cmd() - Send a command through NHI mailbox
@@ -774,7 +766,7 @@ EXPORT_SYMBOL_GPL(tb_ring_free);
  * Sends mailbox command to the firmware running on NHI. Returns %0 in
  * case of success and negative errno in case of failure.
  */
-int nhi_mailbox_cmd(struct tb_nhi *nhi, enum nhi_mailbox_cmd cmd, u32 data)
+int pci_nhi_mailbox_cmd(struct tb_nhi *nhi, enum nhi_mailbox_cmd cmd, u32 data)
 {
 	ktime_t timeout;
 	u32 val;
@@ -809,7 +801,7 @@ int nhi_mailbox_cmd(struct tb_nhi *nhi, enum nhi_mailbox_cmd cmd, u32 data)
  * The function reads current firmware operation mode using NHI mailbox
  * registers and returns it to the caller.
  */
-enum nhi_fw_mode nhi_mailbox_mode(struct tb_nhi *nhi)
+enum nhi_fw_mode pci_nhi_mailbox_mode(struct tb_nhi *nhi)
 {
 	u32 val;
 
@@ -1177,6 +1169,7 @@ static int nhi_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -ENOMEM;
 
 	nhi->pdev = pdev;
+	nhi->dev = &pdev->dev;
 	nhi->ops = (const struct tb_nhi_ops *)id->driver_data;
 	/* cannot fail - table is allocated bin pcim_iomap_regions */
 	nhi->iobase = pcim_iomap_table(pdev)[0];
