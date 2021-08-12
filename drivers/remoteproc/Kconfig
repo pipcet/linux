@@ -337,6 +337,15 @@ config APPLE_M1_ASC_PANIC
 
 	  Say Y here if you see this option.
 
+config APPLE_M1_ASC_SYSLOG
+        tristate "Apple M1 ASC syslog endpoint support"
+	depends_on APPLE APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Say Y here if you see this option.
+
 endif # REMOTEPROC
 
 endmenu
