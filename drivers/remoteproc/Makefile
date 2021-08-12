@@ -36,5 +36,6 @@ obj-$(CONFIG_STM32_RPROC)		+= stm32_rproc.o
 obj-$(CONFIG_TI_K3_DSP_REMOTEPROC)	+= ti_k3_dsp_remoteproc.o
 obj-$(CONFIG_TI_K3_R5_REMOTEPROC)	+= ti_k3_r5_remoteproc.o
 obj-$(CONFIG_APPLE_M1_ASC)		+= apple-asc.o
+obj-$(CONFIG_APPLE_M1_ASC_MGMT)		+= apple-asc-mgmt.o
 obj-$(CONFIG_APPLE_M1_ASC_PANIC)	+= apple-asc-panic.o
 obj-$(CONFIG_APPLE_M1_ASC_SYSLOG)	+= apple-asc-syslog.o
