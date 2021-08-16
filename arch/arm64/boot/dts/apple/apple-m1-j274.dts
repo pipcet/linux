@@ -1,5 +1,9 @@
 /dts-v1/;
 
+#define SMC(A,B,C,D) (((ASCII_##A)<<24)|((ASCII_##B)<<16)|((ASCII_##C)<<8)|((ASCII_##D))) 1
+
+#include <dt-bindings/soc/apple-smc.h>
+#include <dt-bindings/soc/ascii.h>
 #include <dt-bindings/leds/common.h>
 
 / {
@@ -16,8 +20,12 @@
         serial0 = &uart0;
     };
 
+    adt {
+    	contents = <0>;
+    };
+
     chosen {
-        bootargs = "earlycon=apple_uart,0x235200000 console=tty0";
+        bootargs = "console=tty0";
     };
 
     memory@800000000 {
@@ -54,6 +62,18 @@
             reg = <0x8 0x03400000 0x0 0x4000>;
             no-map;
         };
+
+	adt@800000000 {
+	    reg = <0x8 0 0 0x4000>;
+	    no-map;
+	};
+
+	bootarsg@800000000 {
+	    reg = <0x8 0x10000000 0 0x4000>;
+	    no-map;
+	};
+
+
     };
 
     io-ranges {
@@ -162,7 +182,7 @@
 
     timer {
         compatible = "arm,armv8-timer";
-        interrupts = <1 1 0xf08   1 0 0xf08>;
+        interrupts = <1 1 0x4   1 0 0x4>;
         clock-frequency = <24000000>;
     };
 
@@ -172,6 +192,7 @@
         #size-cells = <2>;
         ranges;
         dma-coherent;
+	nonposted-mmio;
 
         applestart: applestart@23b754004 {
             compatible = "apple,startcpu";
@@ -345,6 +366,36 @@
             pinctrl-names = "default";
             #address-cells = <0x1>;
             #size-cells = <0x0>;
+
+	    hpm0: hpm0@38 {
+		compatible = "ti,tps6598x";
+		reg = <0x38>;
+		interrupt-parent = <&gpio>;
+		interrupts = <106 8>;
+                typec0: connector {
+                    compatible = "usb-c-connector";
+                    label = "USB-C B";
+                    power-role = "source";
+                    data-role = "host";
+
+                    ports {
+                        #address-cells = <1>;
+                        #size-cells = <0>;
+                        port@0 {
+                            reg = <0>;
+                            typec0_con_hs: endpoint {
+                                remote-endpoint = <&typec0_usb_hs>;
+                            };
+                        };
+                        port@1 {
+                            reg = <1>;
+                            typec0_con_ss: endpoint {
+                                remote-endpoint = <&typec0_phy_ss>;
+                            };
+                        };
+                    };
+                };
+	    };
 
             hpm1: hpm1@3f {
                 compatible = "ti,tps6598x";
@@ -730,7 +781,6 @@
 
         usb_drd1: usb_drd1@502280000 {
             compatible = "apple,dwc3-m1";
-            clocks = <&atc1_usb &atcphy1>;
             clock-names = "usbclk", "utmiclk";
             reg = <0x5 0x00000000 0x0 0x1000000   0x5 0x02000000 0x0 0x1000000>;
             reg-names = "atcphy", "usbcore";
@@ -872,7 +922,7 @@
             pinctrl-names = "default";
             perst-gpios = <&gpio 152 0   &gpio 153 0   &gpio 33 0>;
             clkreq-gpios = <&gpio 150 0   &gpio 151 0   &gpio 32 0>;
-            devpwr-gpios = <&smc 13 0>;
+            devpwr-gpios = <&smc_gpio 0 0>;
             devpwr-on-0 = <0 1>;
             devpwr-on-1 = <>;
             devpwr-on-2 = <>;
@@ -1046,32 +1096,5 @@
             compatible = "apple,reboot-v0";
             reg = <0x2 0x3d2b0000 0x0 0x4000>;
         };
-
-	fpwm0_clk: fpwm0_clk@23b7001e0 {
-	    compatible = "apple,pmgr-clk-gate";
-	    #clock-cells = <0>;
-	    reg = <0x2 0x3b7001e0 0x0 0x8>;
-	    clocks = <&refclk24mhz>;
-	    clock-output-names = "fpwm0_clk";
-	};
-
-	fpwm0: pwm@235044000 {
-	    compatible = "apple,fpwm-t8101";
-	    reg = <0x2 0x35044000 0x0 0x4000>;
-	    clocks = <&fpwm0_clk>;
-	    #pwm-cells = <2>;
-	};
-
-	leds {
-	    compatible = "pwm-leds";
-
-	    kbd-backlight {
-	        label = "kbd_backlight";
-		function = LED_FUNCTION_KBD_BACKLIGHT;
-		color = <LED_COLOR_ID_WHITE>;
-		pwms = <&fpwm0 0 1000>;
-		max-brightness = <255>;
-	    };
-	};
     };
 };
