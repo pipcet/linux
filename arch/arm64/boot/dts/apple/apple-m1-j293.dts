@@ -710,7 +710,7 @@
 			#iommu-cells = <1>;
 		};
 
-#if 0
+#if 1
 		smc_mbox: smc_mbox@23e408800 {
 			compatible = "apple,iop-mailbox-m1";
 			reg = <0x2 0x3e400000 0x0 0x20000>;
@@ -861,7 +861,7 @@
 			pinctrl-names = "default";
 			perst-gpios = <&gpio 152 0   &gpio 153 0   &gpio 33 0>;
 			clkreq-gpios = <&gpio 150 0   &gpio 151 0   &gpio 32 0>;
-			devpwr-gpios = <&smc_gpio 0 0>;
+			devpwr-gpios = <&smc 13 0>;
 			devpwr-on-0 = <0 1>;
 			devpwr-on-1 = <>;
 			devpwr-on-2 = <>;
@@ -1126,7 +1126,7 @@
 		};
 	};
 
-#if 0
+#if 1
 	backlight: backlight {
 		compatible = "gpio-backlight";
 		gpios = <&smc 18 0>;
@@ -1134,11 +1134,12 @@
 		status = "okay";
 		phandle = <0x02>;
 	};
-#endif
+#else
 	backlight: backlight {
 		compatible = "apple,apple-m1-backlight";
 		max-brightness = <0x20d0000>;
 		mboxes = <&dcp_asc_dcp 0>;
-		power-gpios = <&smc_gpio 1 0>;
+		power-gpios = <&smc 18 0>;
 	};
+#endif
 };
