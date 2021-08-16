@@ -3,6 +3,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/mailbox_client.h>
+#include <linux/gpio/consumer.h>
 
 #define TIMEOUT_MSEC 800
 
@@ -26,9 +27,12 @@ struct apple_dcp_mbox_msg {
 struct apple_backlight {
 	struct device *dev;
 	struct backlight_device *backlight_device;
+	/* The mailbox client, for setting the brightness. */
 	struct mbox_client cl;
 	struct mbox_chan *chan;
 	u64 max_brightness;
+	/* The gP12 backend, for cutting power quickly. */
+	struct gpio_desc *gpio_desc;
 };
 
 static const struct of_device_id apple_backlight_of_match[] = {
@@ -52,9 +56,15 @@ static int apple_backlight_update_status(struct backlight_device *bld)
 	msg->dcp.len_output = 4;
 	memcpy(msg->dcp_data, payload, sizeof(payload));
 
-	printk("sending msg\n");
 	ret = mbox_send_message(backlight->chan, msg);
 	kfree(msg);
+
+	if (ret < 0)
+		return ret;
+
+	ret = gpiod_direction_output
+		(backlight->gpio_desc,
+		 backlight_get_brightness(bld) == 0 ? 0 : 1);
 
 	if (ret < 0)
 		return ret;
@@ -93,6 +103,12 @@ static int apple_backlight_probe(struct platform_device *pdev)
 		dev_err(backlight->dev, "couldn't acquire mailbox channel");
 		return PTR_ERR(backlight->chan);
 	}
+
+	backlight->gpio_desc = devm_gpiod_get
+		(backlight->dev, "power-gpios", 0);
+
+	if (IS_ERR(backlight->gpio_desc))
+		return PTR_ERR(backlight->gpio_desc);
 
 	props.max_brightness = backlight->max_brightness;
 	props.type = BACKLIGHT_FIRMWARE;
