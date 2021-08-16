@@ -30,6 +30,8 @@ struct kvbox {
 	struct kvbox_prop *known_props;
 	size_t num_known_props;
 	void *priv;
+
+	struct dentry *debugfs_dir;
 };
 
 extern int kvbox_read(struct kvbox *kvbox,
@@ -39,6 +41,9 @@ extern int kvbox_read(struct kvbox *kvbox,
 extern int kvbox_write(struct kvbox *kvbox,
 		       struct kvbox_prop *prop,
 		       kvbox_cb_t callback, void *priv);
+
+extern int kvbox_read_interruptible(struct kvbox *kvbox, struct kvbox_prop *prop);
+extern int kvbox_write_interruptible(struct kvbox *kvbox, struct kvbox_prop *prop);
 
 extern int kvbox_fake_request(struct kvbox *kvbox,
 			      kvbox_cb_t callback, void *priv);
