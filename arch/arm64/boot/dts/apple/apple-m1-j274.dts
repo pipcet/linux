@@ -970,30 +970,90 @@
             #iommu-cells = <1>;
         };
 
-        smc_mbox: smc_mbox@23e408800 {
-            compatible = "apple,iop-mailbox-m1";
-            reg = <0x2 0x3e400000 0x0 0x20000>;
-            interrupts = <0 400 4   0 403 4>;
+		smc_mbox: smc_mbox@23e408000 {
+		        compatible = "apple,apple-bare-mailbox";
+			reg = <0x2 0x3e408000 0 0x4000>;
+			#mbox-cells = <1>; /* could be 0, but that requires extra code */
+			interrupts = <0 400 4  0 403 4>;
+		};
 
-            #mbox-cells = <1>;
-            endpoints = <32>;
-        };
+		smc_asc: smc_asc@23e400000 {
+		        compatible = "apple,apple-asc";
+			reg = <0x2 0x3e400000 0 0x8000>;
+			rproc-name = "smc";
+			mboxes = <&smc_mbox 0>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			smc_asc_mgmt: smc_asc_mgmt@0 {
+				compatible = "apple,apple-asc-mgmt";
+				mboxes = <&smc_asc 0x0>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_panic: smc_asc_panic@1 {
+				compatible = "apple,apple-asc-panic";
+				mboxes = <&smc_asc 0x1>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_syslog: smc_asc_syslog@2 {
+				compatible = "apple,apple-asc-syslog";
+				mboxes = <&smc_asc 0x2>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_ioreport: smc_asc_ioreport@4 {
+				compatible = "apple,apple-asc-ioreport";
+				mboxes = <&smc_asc 0x4>;
+				rprocs = <&smc_asc>;
+			};
+			smc: smc_asc_smc@20 {
+			        compatible = "apple,apple-asc-smc";
+				mboxes = <&smc_asc 0x20>;
+				rprocs = <&smc_asc>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				#kvbox-cells = <1>;
+				interrupt-controller;
+				#interrupt-cells = <1>;
+				smc_gpio: smc_gpio {
+					compatible = "kvbox-gpio";
+					kvboxes = <&smc 0>;
+					kvbox-keys = "gP0d", "gP12";
+					kvbox-read-suffix = /bits/ 8 <0x00 0x01 0x00 0x00 0x00>;
+					kvbox-write-enable = /bits/ 8 <0x01 0x00 0x80 0x00>;
+					kvbox-write-disable = /bits/ 8 <0x00 0x00 0x00 0x00>;
+					gpio-line-names = "gP0d", "gP12";
+				        gpio-controller;
+					#gpio-cells = <2>;
 
-        smc: smc@23e050000 {
-            compatible = "apple,smc-m1";
-            reg = <0x2 0x3e050000 0x0 0x4000>;
-            mboxes = <&smc_mbox 32>;
+#define SMC_PIN(a,b,c,d,description) \
+	pin_##a##b##c##d { \
+		gpio-line-name = description; \
+	        key-read = /bits/ 8 <ASCII_##d ASCII_##c ASCII_##b ASCII_##a 0x00 0x01 0x00 0x00 0x00>; \
+	        key-write = /bits/ 8 <ASCII_##d ASCII_##c ASCII_##b ASCII_##a>; \
+	        data-enable = /bits/ 8 <0x01 0x00 0x00 0x00>; \
+	        data-disable = /bits/ 8 <0x00 0x00 0x00 0x00>; \
+	}
+	     		      		SMC_PIN(g,P,0,d,"PCI power");
+					SMC_PIN(g,P,1,2,"backlight power");
+				};
+				smc_battery {
+					compatible = "kvbox-battery";
+					kvboxes = <&smc 0>;
+					interrupts = <&smc SMC_IRQ_BATT>;
 
-            gpio-controller;
-            #gpio-cells = <2>;
-            gpio-9 = <0x10000>;
-            gpio-13 = <0x800000>;
-            gpio-15 = <0>;
-            gpio-20 = <0>;
-
-            nvmem = <&sysctrl>;
-            nvmem-poweroff = <0x1 0xff 0x00   0x3 0xff 0x00   0xf 0x2f 0x08>;
-        };
+					capacity-prop = <FOURCC(S,B,A,S)>;
+				};
+				smc_adc {
+					compatible = "apple,apple-asc-smc-adc";
+					kvboxes = <&smc 0>;
+					#kvbox-cells = <1>;
+				};
+				smc_hid {
+					compatible = "apple,apple-asc-smc-hid";
+					kvboxes = <&smc 0>;
+					interrupts = <&smc SMC_IRQ_HID>;
+				};
+			};
+		};
 
         pcie: pcie@690000000 {
             compatible = "apple,pcie-m1";
