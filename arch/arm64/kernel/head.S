@@ -90,7 +90,7 @@
 	 */
 SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
-	bl	cpuinit
+	bl	init_cpu
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	adrp	x23, __PHYS_OFFSET
 	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
@@ -653,6 +653,8 @@ SYM_FUNC_END(secondary_holding_pen)
 #define SR_H13_KTRR_LOWER	s3_4_c15_c2_3
 #define SR_H13_KTRR_UPPER	s3_4_c15_c2_4
 
+#include "m1n1-chickens.S"
+
 cpuinit:
     msr oslar_el1, xzr
 
@@ -850,7 +852,7 @@ cpuinit_h13p:
     ret
 
 SYM_FUNC_START(secondary_entry)
-	bl cpuinit
+	bl 	init_cpu
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	bl	set_cpu_boot_mode_flag
 	b	secondary_startup
