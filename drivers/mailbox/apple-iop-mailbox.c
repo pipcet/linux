@@ -159,7 +159,7 @@ static int apple_iop_mailbox_ep0_next_a2i(struct apple_iop_mailbox_data *am, u64
 		if(am->ep0_sub == EP_INVALID) {
 			if (!am->seen_hello) {
 				am->ep0_state = EP0_DONE;
-				dev_info(am->dev, "completed startup (no hello)\n");
+				dev_info_ratelimited(am->dev, "completed startup (no hello)\n");
 			} else {
 				am->ep0_state = EP0_WAIT_PWROK;
 			}
@@ -169,7 +169,7 @@ static int apple_iop_mailbox_ep0_next_a2i(struct apple_iop_mailbox_data *am, u64
 		msg[0] = 0x00b0000000000000 | am->ep0_sub;
 		msg[1] = 0;
 		am->ep0_state = EP0_DONE;
-		dev_info(am->dev, "completed startup after hello\n");
+		dev_info_ratelimited(am->dev, "completed startup after hello\n");
 		return 1;
 	}
 }
@@ -347,8 +347,7 @@ static irqreturn_t apple_iop_mailbox_i2a_full_isr(int irq, void *dev_id)
 		/* if empty, push the notification state machine */
 		stat = am->hwops->a2i_stat(am);
 		while(!am->hwops->a2i_full(stat) && apple_iop_mailbox_ep0_next_a2i(am, msg)) {
-			if(am->trace)
-				dev_info_ratelimited(am->dev, "tx msg %016llx %16llx\n", msg[0], msg[1]);
+			dev_info_ratelimited(am->dev, "tx msg %016llx %16llx\n", msg[0], msg[1]);
 			am->hwops->a2i_msg(am, msg);
 			apple_iop_mailbox_unmask_a2i_empty(am);
 			stat = am->hwops->a2i_stat(am);
@@ -487,7 +486,7 @@ static void apple_iop_builtin_work_ep(struct apple_iop_mailbox_data *am, unsigne
 		} else
 			addr = 0;
 		msg[0] &= ~0xFFFFFFFFFFF;
-		msg[0] |= bep->dmah;
+		msg[0] |= addr;
 		apple_iop_mailbox_send_data(chan, msg);
 	}
 }
@@ -651,13 +650,13 @@ static void apple_iop_mailbox_a7v4_try_boot(struct apple_iop_mailbox_data *am)
 	if(!am->wait_init && am->ep0_state == EP0_WAIT_HELLO) {
 		ctrl = readl(am->base + A7V4_CPU_CTRL);
 		if(ctrl & A7V4_CPU_CTRL_RUN) {
-			dev_info(am->dev, "waking coprocessor.\n");
+			dev_info_ratelimited(am->dev, "waking coprocessor.\n");
 			writeq(0x0020000100000000 | 0xb000b,
 			       am->base + A7V4_A2I_MSG0);
 			writeq(0, am->base + A7V4_A2I_MSG1);
 			apple_iop_mailbox_unmask_a2i_empty(am);
 		} else {
-			dev_info(am->dev, "booting coprocessor.\n");
+			dev_info_ratelimited(am->dev, "booting coprocessor.\n");
 			writel(ctrl | A7V4_CPU_CTRL_RUN, am->base + A7V4_CPU_CTRL);
 		}
 	}
@@ -940,7 +939,7 @@ static int apple_iop_mailbox_probe(struct platform_device *pdev)
 	spin_unlock_irqrestore(&am->lock, flags);
 
 	if (am->hwops == &apple_iop_mailbox_a7v4_hwops) {
-		dev_info(&pdev->dev, "registering timer for %016llx", am);
+		dev_info_ratelimited(&pdev->dev, "registering timer for %016llx", am);
 		timer_setup(&am->poll_timer, poll_timer_fn, 0);
 		mod_timer(&am->poll_timer, jiffies + 10);
 	}
