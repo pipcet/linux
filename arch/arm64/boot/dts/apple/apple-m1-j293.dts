@@ -1,48 +1,13 @@
 /dts-v1/;
 
-#define ASCII_A 0x41
-#define ASCII_B 0x42
-#define ASCII_C 0x43
-#define ASCII_D 0x44
-#define ASCII_E 0x45
-#define ASCII_F 0x46
-#define ASCII_G 0x47
-#define ASCII_H 0x48
-#define ASCII_I 0x49
-#define ASCII_J 0x4a
-#define ASCII_K 0x4b
-#define ASCII_L 0x4c
-#define ASCII_M 0x4d
-#define ASCII_N 0x4e
-#define ASCII_O 0x4f
-#define ASCII_P 0x50
-#define ASCII_Q 0x51
-#define ASCII_R 0x52
-#define ASCII_S 0x53
-#define ASCII_T 0x54
-#define ASCII_U 0x55
-#define ASCII_V 0x56
-#define ASCII_W 0x57
-#define ASCII_X 0x58
-#define ASCII_Y 0x59
-#define ASCII_Z 0x5a
-#define ASCII_0 0x30
-#define ASCII_1 0x31
-#define ASCII_2 0x32
-#define ASCII_3 0x33
-#define ASCII_4 0x34
-#define ASCII_5 0x35
-#define ASCII_6 0x36
-#define ASCII_7 0x37
-#define ASCII_8 0x38
-#define ASCII_9 0x39
-
 #define SMC(A,B,C,D) (((ASCII_##A)<<24)|((ASCII_##B)<<16)|((ASCII_##C)<<8)|((ASCII_##D))) 1
 
+#include <dt-bindings/soc/apple-smc.h>
+#include <dt-bindings/soc/ascii.h>
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "Mac Mini Late 2020";
+	model = "MacBook Pro early 2021";
 	compatible = "apple,m1";
 
 	hardware-model = "J293";
@@ -226,6 +191,7 @@
 		#size-cells = <2>;
 		ranges;
 		dma-coherent;
+		nonposted-mmio;
 
 		applestart: applestart@23b754004 {
 			compatible = "apple,startcpu";
@@ -403,7 +369,7 @@
 			hpm0: hpm0@38 {
 				compatible = "ti,tps6598x";
 				reg = <0x38>;
-				interrupt-parent = <0x0c>;
+				interrupt-parent = <&gpio>;
 				interrupts = <106 8>;
 
 				no-long-writes;
@@ -744,6 +710,7 @@
 			#iommu-cells = <1>;
 		};
 
+#if 0
 		smc_mbox: smc_mbox@23e408800 {
 			compatible = "apple,iop-mailbox-m1";
 			reg = <0x2 0x3e400000 0x0 0x20000>;
@@ -789,6 +756,93 @@
 				reg = <SMC(M,S,L,D)>;
 			};
 		};
+#else
+		smc_mbox: smc_mbox@23e408000 {
+		        compatible = "apple,apple-bare-mailbox";
+			reg = <0x2 0x3e408000 0 0x4000>;
+			#mbox-cells = <1>; /* could be 0, but that requires extra code */
+			interrupts = <0 400 4  0 403 4>;
+		};
+
+		smc_asc: smc_asc@23e400000 {
+		        compatible = "apple,apple-asc";
+			reg = <0x2 0x3e400000 0 0x8000>;
+			rproc-name = "smc";
+			mboxes = <&smc_mbox 0>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			smc_asc_mgmt: smc_asc_mgmt@0 {
+				compatible = "apple,apple-asc-mgmt";
+				mboxes = <&smc_asc 0x0>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_panic: smc_asc_panic@1 {
+				compatible = "apple,apple-asc-panic";
+				mboxes = <&smc_asc 0x1>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_syslog: smc_asc_syslog@2 {
+				compatible = "apple,apple-asc-syslog";
+				mboxes = <&smc_asc 0x2>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_ioreport: smc_asc_ioreport@4 {
+				compatible = "apple,apple-asc-ioreport";
+				mboxes = <&smc_asc 0x4>;
+				rprocs = <&smc_asc>;
+			};
+			smc: smc_asc_smc@20 {
+			        compatible = "apple,apple-asc-smc";
+				mboxes = <&smc_asc 0x20>;
+				rprocs = <&smc_asc>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				#kvbox-cells = <1>;
+				interrupt-controller;
+				#interrupt-cells = <1>;
+				smc_gpio: smc_gpio {
+					compatible = "kvbox-gpio";
+					kvboxes = <&smc 0>;
+					kvbox-keys = "gP0d", "gP12";
+					kvbox-read-suffix = /bits/ 8 <0x00 0x01 0x00 0x00 0x00>;
+					kvbox-write-enable = /bits/ 8 <0x01 0x00 0x80 0x00>;
+					kvbox-write-disable = /bits/ 8 <0x00 0x00 0x00 0x00>;
+					gpio-line-names = "gP0d", "gP12";
+				        gpio-controller;
+					#gpio-cells = <2>;
+
+#define SMC_PIN(a,b,c,d,description) \
+	pin_##a##b##c##d { \
+		gpio-line-name = description; \
+	        key-read = /bits/ 8 <ASCII_##d ASCII_##c ASCII_##b ASCII_##a 0x00 0x01 0x00 0x00 0x00>; \
+	        key-write = /bits/ 8 <ASCII_##d ASCII_##c ASCII_##b ASCII_##a>; \
+	        data-enable = /bits/ 8 <0x01 0x00 0x00 0x00>; \
+	        data-disable = /bits/ 8 <0x00 0x00 0x00 0x00>; \
+	}
+	     		      		SMC_PIN(g,P,0,d,"PCI power");
+					SMC_PIN(g,P,1,2,"backlight power");
+				};
+				smc_battery {
+					compatible = "kvbox-battery";
+					kvboxes = <&smc 0>;
+					interrupts = <&smc SMC_IRQ_BATT>;
+
+					capacity-prop = <FOURCC(S,B,A,S)>;
+				};
+				smc_adc {
+					compatible = "apple,apple-asc-smc-adc";
+					kvboxes = <&smc 0>;
+					#kvbox-cells = <1>;
+				};
+				smc_hid {
+					compatible = "apple,apple-asc-smc-hid";
+					kvboxes = <&smc 0>;
+					interrupts = <&smc SMC_IRQ_HID>;
+				};
+			};
+		};
+
+#endif
 
 		pcie: pcie@690000000 {
 			compatible = "apple,pcie-m1";
@@ -807,7 +861,7 @@
 			pinctrl-names = "default";
 			perst-gpios = <&gpio 152 0   &gpio 153 0   &gpio 33 0>;
 			clkreq-gpios = <&gpio 150 0   &gpio 151 0   &gpio 32 0>;
-			devpwr-gpios = <&smc 13 0>;
+			devpwr-gpios = <&smc_gpio 0 0>;
 			devpwr-on-0 = <0 1>;
 			devpwr-on-1 = <>;
 			devpwr-on-2 = <>;
@@ -1021,22 +1075,43 @@
 		dcp_mbox: dcp_mbox@231c00000 {
 		        compatible = "apple,apple-bare-mailbox";
 			reg = <0x2 0x31c08000 0 0x4000>;
-			#mbox-cells = <1>;
-			endpoints = <0>;
+			#mbox-cells = <1>; /* could be 0, but that requires extra code */
 			interrupts = <0 0x1ab 4  0 0x1ae 4>;
-		};
-
-		dcp_funnel: dcp_funnel@0 {
-			compatible = "apple,apple-mailbox-funnel";
-			#mbox-cells = <1>;
-			endpoints = <32 0x37>;
-			mboxes = <&dcp_mbox 0>;
 		};
 
 		dcp_asc: dcp_asc@231c00000 {
 		        compatible = "apple,apple-asc";
 			reg = <0x2 0x31c00000 0 0x8000 0xb 0xe6194000 0 0x19e6c000>;
-			mboxes = <&dcp_funnel 0 &dcp_funnel 1 &dcp_funnel 2 &dcp_funnel 4>;
+			rproc-name = "dcp";
+			mboxes = <&dcp_mbox 0>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			dcp_asc_mgmt: dcp_asc_mgmt@0 {
+				compatible = "apple,apple-asc-mgmt";
+				mboxes = <&dcp_asc 0x0>;
+				rprocs = <&dcp_asc>;
+			};
+			dcp_asc_panic: dcp_asc_panic@1 {
+				compatible = "apple,apple-asc-panic";
+				mboxes = <&dcp_asc 0x1>;
+				rprocs = <&dcp_asc>;
+			};
+			dcp_asc_syslog: dcp_asc_syslog@2 {
+				compatible = "apple,apple-asc-syslog";
+				mboxes = <&dcp_asc 0x2>;
+				rprocs = <&dcp_asc>;
+			};
+			dcp_asc_ioreport: dcp_asc_ioreport@4 {
+				compatible = "apple,apple-asc-iorpt";
+				mboxes = <&dcp_asc 0x4>;
+				rprocs = <&dcp_asc>;
+			};
+			dcp_asc_dcp: dcp_asc_dcp@37 {
+				compatible = "apple,apple-asc-dcp";
+				mboxes = <&dcp_asc 0x37>;
+				rprocs = <&dcp_asc>;
+				#mbox-cells = <1>; /* could be 0, but requires extra code */
+			};
 		};
 	};
 	leds {
@@ -1051,11 +1126,19 @@
 		};
 	};
 
+#if 0
 	backlight: backlight {
 		compatible = "gpio-backlight";
 		gpios = <&smc 18 0>;
 		default-on;
 		status = "okay";
 		phandle = <0x02>;
+	};
+#endif
+	backlight: backlight {
+		compatible = "apple,apple-m1-backlight";
+		max-brightness = <0x20d0000>;
+		mboxes = <&dcp_asc_dcp 0>;
+		power-gpios = <&smc_gpio 1 0>;
 	};
 };
