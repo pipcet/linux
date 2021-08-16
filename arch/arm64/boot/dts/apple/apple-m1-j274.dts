@@ -367,14 +367,17 @@
             #address-cells = <0x1>;
             #size-cells = <0x0>;
 
-	    hpm0: hpm0@38 {
-		compatible = "ti,tps6598x";
-		reg = <0x38>;
-		interrupt-parent = <&gpio>;
-		interrupts = <106 8>;
+            hpm0: hpm0@38 {
+                compatible = "ti,tps6598x";
+                reg = <0x38>;
+                interrupt-parent = <&gpio>;
+                interrupts = <106 8>;
+
+                no-long-writes;
+
                 typec0: connector {
                     compatible = "usb-c-connector";
-                    label = "USB-C B";
+                    label = "USB-C A";
                     power-role = "source";
                     data-role = "host";
 
@@ -395,7 +398,7 @@
                         };
                     };
                 };
-	    };
+            };
 
             hpm1: hpm1@3f {
                 compatible = "ti,tps6598x";
@@ -487,6 +490,37 @@
             clock-output-names = "atc0_cio_usb";
         };
 
+        atcphy0: atcphy0@380000000 {
+            compatible = "apple,atc-phy-m1";
+            clocks = <&atc0_usb>;
+            reg = <0x3 0x80000000 0x0 0x1000000
+                   0x3 0x82000000 0x0 0x1080000>;
+            #phy-cells = <0>;
+            usb-role-switch;
+            orientation-switch;
+            mode-switch;
+            accessory;
+            #clock-cells = <0>;
+            clock-output-names = "utmi0clk";
+
+            ports {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                port@0 {
+                    reg = <0>;
+                    typec0_phy_ss: endpoint {
+                        remote-endpoint = <&typec0_con_ss>;
+                    };
+                };
+                port@1 {
+                    reg = <1>;
+                    typec0_pipe_ss: endpoint {
+                        remote-endpoint = <&typec0_usb_ss>;
+                    };
+                };
+            };
+        };
+
         acio_mbox0: acio_mbox0@381100000 {
             compatible = "apple,iop-mailbox-micro-m1";
             reg = <0x3 0x81100000 0x0 0x4000>;
@@ -514,6 +548,25 @@
             sid-mask = <0x8003>;
             sid-bypass-mask = <0x8000>;
             #iommu-cells = <1>;
+        };
+
+        acio0: acio0@381f00000 {
+            compatible = "apple,cio-nhi-m1";
+            clocks = <&acio_reconfig0>;
+            reg = <0x3 0x81f00000 0x0 0x100000
+                   0x3 0x81ac0000 0x0 0x440000>;
+            interrupts = <0 783 1   0 784 1   0 785 1   0 786 1
+                          0 787 1   0 788 1   0 789 1   0 790 1
+                          0 791 1   0 792 1   0 793 1   0 794 1
+                          0 795 1   0 796 1   0 797 1   0 798 1
+                          0 799 1   0 800 1   0 801 1   0 802 1
+                          0 803 1   0 804 1   0 805 1   0 806 1>;
+            iommus = <&acio_dart0 1>;
+            phys = <&atcphy0>;
+            pinctrl-0 = <&acio0_ls_pins>;
+            pinctrl-names = "default";
+            num-rings = <12>;
+            pcie = <&pciec0>;
         };
 
         pciec0_dart: pciec0_dart@3a1008000 {
@@ -578,6 +631,43 @@
             sid-mask = <11>;
             sid-remap = <0 1>;
             #iommu-cells = <1>;
+        };
+
+        usb_drd0: usb_drd0@382280000 {
+            compatible = "apple,dwc3-m1";
+            clocks = <&atc0_usb &atcphy0>;
+            clock-names = "usbclk", "utmiclk";
+            reg = <0x3 0x80000000 0x0 0x1000000   0x3 0x82000000 0x0 0x1000000>;
+            reg-names = "atcphy", "usbcore";
+            #address-cells = <2>;
+            #size-cells = <2>;
+            ranges;
+
+            usbdrd_dwc3_0: dwc3@382280000 {
+                compatible = "snps,dwc3";
+                reg = <0x3 0x82280000 0x0 0x100000>;
+                interrupts = <0 777 4>;
+                iommus = <&usb_dart0 1>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+                dr_mode = "host";
+
+                phys = <&atcphy0>, <&atcphy0>;
+                phy-names = "usb2-phy", "usb3-phy";
+
+                port@0 {
+                    reg = <0>;
+                    typec0_usb_hs: endpoint {
+                        remote-endpoint = <&typec0_con_hs>;
+                    };
+                };
+                port@1 {
+                    reg = <1>;
+                    typec0_usb_ss: endpoint {
+                        remote-endpoint = <&typec0_pipe_ss>;
+                    };
+                };
+            };
         };
 
         atc1_common: atc1_common@23b700448 {
