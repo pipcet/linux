@@ -3,10 +3,43 @@ config NVME_CORE
 	tristate
 	select BLK_DEV_INTEGRITY_T10 if BLK_DEV_INTEGRITY
 
-config BLK_DEV_NVME
-	tristate "NVM Express block device"
-	depends on PCI && BLOCK
+config NVME_MMIO
+	tristate
 	select NVME_CORE
+	help
+	  This is the common code shared by the PCIe driver (BLK_DEV_NVME)
+	  and the platform driver used for on-chip implementations.
+
+config BLK_DEV_NVME
+	tristate "NVM Express block device using PCIe"
+	depends on PCI && BLOCK
+	select NVME_MMIO
+	help
+	  The NVM Express driver is for solid state drives directly
+	  connected to the PCI or PCI Express bus.  If you know you
+	  don't have one of these, it is safe to answer N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called nvme.
+
+config BLK_DEV_NVME_PLATFORM
+	tristate "NVM Express block device integrated on SoC"
+	depends on OF && BLOCK
+	select NVME_MMIO
+	help
+	  NVM Express devices can be integrated into a System-on-Chip
+	  (SoC) platform without a discoverable PCIe bus.
+	  The NVMe platform driver supports such devices using
+	  a device tree description.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called nvme.
+
+config BLK_DEV_NVME_APPLE
+	tristate "Apple ANS2 NVM Express block device"
+	depends on ARCH_APPLE && BLOCK
+	select NVME_CORE
+        default ARCH_APPLE
 	help
 	  The NVM Express driver is for solid state drives directly
 	  connected to the PCI or PCI Express bus.  If you know you
