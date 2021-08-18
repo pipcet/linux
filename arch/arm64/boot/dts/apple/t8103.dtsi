@@ -131,5 +131,25 @@
 			interrupt-controller;
 			reg = <0x2 0x3b100000 0x0 0x8000>;
 		};
+
+		fpwm0: pwm@235044000 {
+			compatible = "apple,t8103-fpwm";
+			reg = <0x2 0x35044000 0x0 0x4000>;
+			clocks = <&clk24>;
+			#pwm-cells = <2>;
+		};
+	};
+
+	leds {
+		compatible = "pwm-leds";
+
+		kbd-backlight {
+			label = "kbd_backlight";
+			function = LED_FUNCTION_KBD_BACKLIGHT;
+			color = <LED_COLOR_ID_WHITE>;
+			pwm-names = "kbd_backlight";
+			pwms = <&fpwm0 0 1000000>;
+			max-brightness = <255>;
+		};
 	};
 };
