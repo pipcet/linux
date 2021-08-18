@@ -138,6 +138,16 @@ enum nvme_quirks {
 	 * 48 bits.
 	 */
 	NVME_QUIRK_DMA_ADDRESS_BITS_48		= (1 << 16),
+
+	/*
+	 * MMIO based hardware that is not on a PCI bus
+	 */
+	NVME_QUIRK_PLATFORM_DEVICE		= (1 << 17),
+
+	/*
+	 * Apple's ANS2 controller is special in many ways...
+	 */
+	NVME_QUIRK_APPLE_ANS2			= (1 << 18),
 };
 
 /*
