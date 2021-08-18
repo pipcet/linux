@@ -390,6 +390,13 @@ config COMMON_CLK_K210
 	help
 	  Support for the Canaan Kendryte K210 RISC-V SoC clocks.
 
+config COMMON_CLK_APPLE_M1_PMGR
+	bool "Clock driver for Apple M1 pmgr power gates"
+	depends on ARCH_APPLE
+	default ARCH_APPLE
+	help
+	  Support for the power manager gates on Apple M1 devices.
+
 source "drivers/clk/actions/Kconfig"
 source "drivers/clk/analogbits/Kconfig"
 source "drivers/clk/baikal-t1/Kconfig"
