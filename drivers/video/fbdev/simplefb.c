@@ -78,6 +78,26 @@ static void simplefb_destroy(struct fb_info *info)
 		iounmap(info->screen_base);
 }
 
+static int simplefb_blank(int blank_mode, struct fb_info *info)
+{
+#if IS_ENABLED(CONFIG_FB_BACKLIGHT)
+	struct backlight_device *backlight = info->bl_dev;
+
+	if (!backlight)
+		return 0;
+
+	if (blank_mode) {
+		backlight->props.power = FB_BLANK_POWERDOWN;
+	} else {
+		backlight->props.power = FB_BLANK_UNBLANK;
+	}
+
+	backlight_update_status(backlight);
+#endif
+
+	return 0;
+}
+
 static const struct fb_ops simplefb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_destroy	= simplefb_destroy,
@@ -85,6 +105,7 @@ static const struct fb_ops simplefb_ops = {
 	.fb_fillrect	= cfb_fillrect,
 	.fb_copyarea	= cfb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
+	.fb_blank       = simplefb_blank,
 };
 
 static struct simplefb_format simplefb_formats[] = SIMPLEFB_FORMATS;
@@ -94,15 +115,17 @@ struct simplefb_params {
 	u32 height;
 	u32 stride;
 	struct simplefb_format *format;
+	struct backlight_device *backlight;
 };
 
 static int simplefb_parse_dt(struct platform_device *pdev,
-			   struct simplefb_params *params)
+			     struct simplefb_params *params)
 {
 	struct device_node *np = pdev->dev.of_node;
 	int ret;
 	const char *format;
 	int i;
+	struct backlight_device *backlight;
 
 	ret = of_property_read_u32(np, "width", &params->width);
 	if (ret) {
@@ -138,6 +161,12 @@ static int simplefb_parse_dt(struct platform_device *pdev,
 		dev_err(&pdev->dev, "Invalid format value\n");
 		return -EINVAL;
 	}
+
+#if IS_ENABLED(CONFIG_FB_BACKLIGHT)
+	backlight = devm_of_find_backlight(&pdev->dev);
+	if (!IS_ERR(backlight))
+		params->backlight = backlight;
+#endif
 
 	return 0;
 }
@@ -411,10 +440,11 @@ static int simplefb_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 	ret = -ENODEV;
-	if (dev_get_platdata(&pdev->dev))
-		ret = simplefb_parse_pd(pdev, &params);
-	else if (pdev->dev.of_node)
+	params.backlight = NULL;
+	if (pdev->dev.of_node)
 		ret = simplefb_parse_dt(pdev, &params);
+	else if (dev_get_platdata(&pdev->dev))
+		ret = simplefb_parse_pd(pdev, &params);
 
 	if (ret)
 		return ret;
@@ -476,6 +506,10 @@ static int simplefb_probe(struct platform_device *pdev)
 
 	simplefb_clocks_enable(par, pdev);
 	simplefb_regulators_enable(par, pdev);
+
+#if IS_ENABLED(CONFIG_FB_BACKLIGHT)
+	info->bl_dev = params.backlight;
+#endif
 
 	dev_info(&pdev->dev, "framebuffer at 0x%lx, 0x%x bytes\n",
 			     info->fix.smem_start, info->fix.smem_len);
