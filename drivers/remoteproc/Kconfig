@@ -315,6 +315,97 @@ config TI_K3_R5_REMOTEPROC
 	  It's safe to say N here if you're not interested in utilizing
 	  a slave processor.
 
+config APPLE_M1_ASC
+        tristate "Apple M1 ASC/IOP/RTKit coprocessor support"
+	depends on ARCH_APPLE
+	help
+	  Support Apple M1 coprocessors using the remoteproc
+	  interface. Note that this driver only provides mailboxes for
+	  other drivers to use and does not provide any user-visible
+	  features by itself.
+
+	  Say Y here if you're on such a system.
+
+config APPLE_M1_ASC_MGMT
+        tristate "Apple M1 ASC management endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Say Y here if you see this option.
+
+config APPLE_M1_ASC_PANIC
+        tristate "Apple M1 ASC panic endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Note that the coprocessors will not work without this driver being enabled.
+
+	  Say Y here if you see this option.
+
+config APPLE_M1_ASC_SYSLOG
+        tristate "Apple M1 ASC syslog endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Say Y here if you see this option.
+
+config APPLE_M1_ASC_IOREPORT
+        tristate "Apple M1 ASC I/O Report endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Say Y here if you see this option.
+
+config APPLE_M1_ASC_SMC
+        tristate "Apple M1 SMC endpoint support"
+	depends on ARCH_APPLE && OF
+	help
+          This driver provides support for the SMC found on the Apple
+          M1 SoC.  It provides hardware monitoring, human input
+          activity, backlight control, and many other features.
+
+	  Say Y here if you have an Apple M1 SoC.
+
+config APPLE_M1_ASC_SMC_ADC
+        tristate "Apple M1 SMC ADC support"
+	depends on ARCH_APPLE && OF
+	help
+	  Say N here.
+
+config APPLE_M1_ASC_SMC_HID
+        tristate "Apple M1 SMC HID support"
+	depends on ARCH_APPLE && OF
+	help
+	  Say N here.
+
+config APPLE_M1_ASC_DCP
+        tristate "Apple M1 DCP endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	help
+	  On the Apple M1 SoC, the DCP chip provides display control
+	  capabilities. This driver exposes the DCP's shared memory to
+	  other drivers as a mailbox.
+
+	  Say Y here if you use an Apple M1 SoC system.
+
+config APPLE_M1_ASC_ANS
+        tristate "Apple M1 ANS endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	help
+	  On the Apple M1 SoC, the ANS chip provides I/O
+	  capabilities. This driver exposes the ANS's shared memory to
+	  other drivers as a mailbox.
+
+	  Say Y here if you use an Apple M1 SoC system.
+
 endif # REMOTEPROC
 
 endmenu
