@@ -292,7 +292,7 @@ config SPAPR_TCE_IOMMU
 
 config APPLE_DART
 	tristate "Apple DART IOMMU Support"
-	depends on ARCH_APPLE || (COMPILE_TEST && !GENERIC_ATOMIC64)
+	depends on ARM64 || (COMPILE_TEST && !GENERIC_ATOMIC64)
 	select IOMMU_API
 	select IOMMU_IO_PGTABLE_LPAE
 	default ARCH_APPLE
@@ -303,6 +303,17 @@ config APPLE_DART
 	  the main memory.
 
 	  Say Y here if you are using an Apple SoC.
+
+config APPLE_DART_LOCKED_PAGE_TABLES
+       bool "Apple DART IOMMU locked page table support"
+       depends on APPLE_DART
+       default APPLE_DART
+       help
+	  The page table base registers in the DART IOMMU are
+	  sometimes locked, so the existing page table has to be
+	  reused by the driver rather than configuring a new one.
+
+	  Say Y here if you are using the DART driver.
 
 # ARM IOMMU support
 config ARM_SMMU
