@@ -1,384 +1,249 @@
-// SPDX-License-Identifier: GPL-2.0-only OR MIT
+// SPDX-License-Identifier: GPL-2.0+
 /*
- * Apple mailbox driver
+ * Mailbox driver for Apple M1 hardware mailboxes. This provides a
+ * single-channel mailbox abstracting just the mailbox hardware,
+ * without interpreting the protocol (including the bits added by the
+ * actual mailbox) in any way.
  *
- * Copyright (C) 2021 The Asahi Linux Contributors
+ * The actual mailbox protocol interprets part of the mailbox message
+ * as an endpoint, but it does not map well to a multi-channel
+ * mailbox: there's only a single queue shared between all endpoints.
  *
- * This driver adds support for two mailbox variants (called ASC and M3 by
- * Apple) found in Apple SoCs such as the M1. It consists of two FIFOs used to
- * exchange 64+32 bit messages between the main CPU and a co-processor.
- * Various coprocessors implement different IPC protocols based on these simple
- * messages and shared memory buffers.
+ * The idea is that a second driver will then funnel a number of
+ * virtual, infallible mailboxes into this single, fallible one.
  *
- * Both the main CPU and the co-processor see the same set of registers but
- * the first FIFO (A2I) is always used to transfer messages from the application
- * processor (us) to the I/O processor and the second one (I2A) for the
- * other direction.
+ * Currently, the driver does not ever queue more than one outgoing
+ * message, even though the mailbox hardware supports this.
+ *
+ * The hardware appears to be almost perfectly symmetrical: you can
+ * read the first queue at +0x810, though usually the CPU only writes
+ * it; you can write the second queue at +0x820, though usually the
+ * CPU only reads it, and I suspect the four interrupts expose both
+ * directions of the mailbox, which is why we only use two of them.
+ *
+ * Copyright (C) 2021 Pip Cet <pipcet@gmail.com>
  */
 
-#include <linux/apple-mailbox.h>
-#include <linux/device.h>
-#include <linux/gfp.h>
-#include <linux/interrupt.h>
-#include <linux/io.h>
-#include <linux/mailbox_controller.h>
 #include <linux/module.h>
-#include <linux/of.h>
+#include <linux/mailbox_controller.h>
+#include <linux/io.h>
+#include <linux/interrupt.h>
 #include <linux/platform_device.h>
-#include <linux/types.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
 
-#define APPLE_ASC_MBOX_CONTROL_FULL  BIT(16)
-#define APPLE_ASC_MBOX_CONTROL_EMPTY BIT(17)
+#include <linux/dma-mapping.h> /* XXX */
 
-#define APPLE_ASC_MBOX_A2I_CONTROL 0x110
-#define APPLE_ASC_MBOX_A2I_SEND0   0x800
-#define APPLE_ASC_MBOX_A2I_SEND1   0x808
-#define APPLE_ASC_MBOX_A2I_RECV0   0x810
-#define APPLE_ASC_MBOX_A2I_RECV1   0x818
+/* There's only one IRQ which we can usefully disable: the one
+ * telling us the CPU-to-IOP queue is empty. We only care
+ * after writing something to it, so the IRQ is initialized
+ * with this flag set. */
+struct apple_mailbox {
+	spinlock_t lock;
+	bool busy;
+	void __iomem *reg;
+	struct mbox_controller mbox_controller;
+	struct mbox_chan mbox_chan;
+	int irq_cpu_to_iop_empty;
+	int irq_iop_to_cpu_nonempty;
 
-#define APPLE_ASC_MBOX_I2A_CONTROL 0x114
-#define APPLE_ASC_MBOX_I2A_SEND0   0x820
-#define APPLE_ASC_MBOX_I2A_SEND1   0x828
-#define APPLE_ASC_MBOX_I2A_RECV0   0x830
-#define APPLE_ASC_MBOX_I2A_RECV1   0x838
-
-#define APPLE_M3_MBOX_CONTROL_FULL  BIT(16)
-#define APPLE_M3_MBOX_CONTROL_EMPTY BIT(17)
-
-#define APPLE_M3_MBOX_A2I_CONTROL 0x50
-#define APPLE_M3_MBOX_A2I_SEND0	  0x60
-#define APPLE_M3_MBOX_A2I_SEND1	  0x68
-#define APPLE_M3_MBOX_A2I_RECV0	  0x70
-#define APPLE_M3_MBOX_A2I_RECV1	  0x78
-
-#define APPLE_M3_MBOX_I2A_CONTROL 0x80
-#define APPLE_M3_MBOX_I2A_SEND0	  0x90
-#define APPLE_M3_MBOX_I2A_SEND1	  0x98
-#define APPLE_M3_MBOX_I2A_RECV0	  0xa0
-#define APPLE_M3_MBOX_I2A_RECV1	  0xa8
-
-#define APPLE_M3_MBOX_IRQ_ENABLE	0x48
-#define APPLE_M3_MBOX_IRQ_ACK		0x4c
-#define APPLE_M3_MBOX_IRQ_A2I_EMPTY	BIT(0)
-#define APPLE_M3_MBOX_IRQ_A2I_NOT_EMPTY BIT(1)
-#define APPLE_M3_MBOX_IRQ_I2A_EMPTY	BIT(2)
-#define APPLE_M3_MBOX_IRQ_I2A_NOT_EMPTY BIT(3)
-
-#define APPLE_MBOX_MSG1_OUTCNT GENMASK(56, 52)
-#define APPLE_MBOX_MSG1_INCNT  GENMASK(51, 48)
-#define APPLE_MBOX_MSG1_OUTPTR GENMASK(47, 44)
-#define APPLE_MBOX_MSG1_INPTR  GENMASK(43, 40)
-#define APPLE_MBOX_MSG1_MSG    GENMASK(31, 0)
-
-struct apple_mbox_hw {
-	unsigned int control_full;
-	unsigned int control_empty;
-
-	unsigned int a2i_control;
-	unsigned int a2i_send0;
-	unsigned int a2i_send1;
-
-	unsigned int i2a_control;
-	unsigned int i2a_recv0;
-	unsigned int i2a_recv1;
-
-	bool has_irq_controls;
-	unsigned int irq_enable;
-	unsigned int irq_ack;
-	unsigned int irq_bit_recv_not_empty;
-	unsigned int irq_bit_send_empty;
+	bool irq_disabled;
 };
 
-struct apple_mbox {
-	void __iomem *regs;
-	const struct apple_mbox_hw *hw;
+#define REG_CPU_TO_IOP          0x110
+#define REG_IOP_TO_CPU          0x114
+#define   REG_EMPTY             BIT(17)
 
-	int irq_recv_not_empty;
-	int irq_send_empty;
+#define REG_SEND_CPU_TO_IOP	0x800
+#define REG_RECV_CPU_TO_IOP     0x810
+#define REG_SEND_IOP_TO_CPU	0x820
+#define REG_RECV_IOP_TO_CPU     0x830
 
-	struct mbox_chan chan;
-
-	struct device *dev;
-	struct mbox_controller controller;
-};
-
-static const struct of_device_id apple_mbox_of_match[];
-
-static bool apple_mbox_hw_can_send(struct apple_mbox *apple_mbox)
+static void apple_mailbox_send_cpu_to_iop(struct apple_mailbox *mb,
+					  void *msg)
 {
-	u32 mbox_ctrl =
-		readl_relaxed(apple_mbox->regs + apple_mbox->hw->a2i_control);
-
-	return !(mbox_ctrl & apple_mbox->hw->control_full);
+	u64 msg_data[2];
+	memcpy(msg_data, msg, sizeof(msg_data));
+	if (1) dev_err(mb->mbox_controller.dev,
+				   "> %016llx %016llx [%016llx]\n",
+				   msg_data[0], msg_data[1], (u64)mb);
+	writeq(msg_data[0], mb->reg + REG_SEND_CPU_TO_IOP);
+	writeq(msg_data[1], mb->reg + REG_SEND_CPU_TO_IOP + 8);
 }
 
-static int apple_mbox_hw_send(struct apple_mbox *apple_mbox,
-			      struct apple_mbox_msg *msg)
+static bool apple_mailbox_cpu_to_iop_empty(struct apple_mailbox *mb)
 {
-	if (!apple_mbox_hw_can_send(apple_mbox))
-		return -EBUSY;
-
-	dev_dbg(apple_mbox->dev, "> TX %016llx %08x\n", msg->msg0, msg->msg1);
-
-	writeq_relaxed(msg->msg0, apple_mbox->regs + apple_mbox->hw->a2i_send0);
-	writeq_relaxed(FIELD_PREP(APPLE_MBOX_MSG1_MSG, msg->msg1),
-		       apple_mbox->regs + apple_mbox->hw->a2i_send1);
-
-	return 0;
+	return readl(mb->reg + REG_CPU_TO_IOP) & REG_EMPTY;
 }
 
-static bool apple_mbox_hw_can_recv(struct apple_mbox *apple_mbox)
+static bool apple_mailbox_iop_to_cpu_empty(struct apple_mailbox *mb)
 {
-	u32 mbox_ctrl =
-		readl_relaxed(apple_mbox->regs + apple_mbox->hw->i2a_control);
-
-	return !(mbox_ctrl & apple_mbox->hw->control_empty);
+	return readl(mb->reg + REG_IOP_TO_CPU) & REG_EMPTY;
 }
 
-static int apple_mbox_hw_recv(struct apple_mbox *apple_mbox,
-			      struct apple_mbox_msg *msg)
+static void apple_mailbox_disable_irq(struct apple_mailbox *mb)
 {
-	if (!apple_mbox_hw_can_recv(apple_mbox))
-		return -ENOMSG;
-
-	msg->msg0 = readq_relaxed(apple_mbox->regs + apple_mbox->hw->i2a_recv0);
-	msg->msg1 = FIELD_GET(
-		APPLE_MBOX_MSG1_MSG,
-		readq_relaxed(apple_mbox->regs + apple_mbox->hw->i2a_recv1));
-
-	dev_dbg(apple_mbox->dev, "< RX %016llx %08x\n", msg->msg0, msg->msg1);
-
-	return 0;
-}
-
-static int apple_mbox_chan_send_data(struct mbox_chan *chan, void *data)
-{
-	struct apple_mbox *apple_mbox = chan->con_priv;
-	struct apple_mbox_msg *msg = data;
-	int ret;
-
-	ret = apple_mbox_hw_send(apple_mbox, msg);
-	if (ret)
-		return ret;
-
-	/*
-	 * The interrupt is level triggered and will keep firing as long as the
-	 * FIFO is empty. It will also keep firing if the FIFO was empty
-	 * at any point in the past until it has been acknowledged at the
-	 * mailbox level. By acknowledging it here we can ensure that we will
-	 * only get the interrupt once the FIFO has been cleared again.
-	 * If the FIFO is already empty before the ack it will fire again
-	 * immediately after the ack.
-	 */
-	if (apple_mbox->hw->has_irq_controls) {
-		writel_relaxed(apple_mbox->hw->irq_bit_send_empty,
-			       apple_mbox->regs + apple_mbox->hw->irq_ack);
+	if (!mb->irq_disabled) {
+		mb->irq_disabled = true;
+		disable_irq_nosync(mb->irq_cpu_to_iop_empty);
 	}
-	enable_irq(apple_mbox->irq_send_empty);
-
-	return 0;
 }
 
-static irqreturn_t apple_mbox_send_empty_irq(int irq, void *data)
+static void apple_mailbox_enable_irq(struct apple_mailbox *mb)
 {
-	struct apple_mbox *apple_mbox = data;
-
-	/*
-	 * We don't need to acknowledge the interrupt at the mailbox level
-	 * here even if supported by the hardware. It will keep firing but that
-	 * doesn't matter since it's disabled at the main interrupt controller.
-	 * apple_mbox_chan_send_data will acknowledge it before enabling
-	 * it at the main controller again.
-	 */
-	disable_irq_nosync(apple_mbox->irq_send_empty);
-	mbox_chan_txdone(&apple_mbox->chan, 0);
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t apple_mbox_recv_irq(int irq, void *data)
-{
-	struct apple_mbox *apple_mbox = data;
-	struct apple_mbox_msg msg;
-
-	while (apple_mbox_hw_recv(apple_mbox, &msg) == 0)
-		mbox_chan_received_data(&apple_mbox->chan, (void *)&msg);
-
-	/*
-	 * The interrupt will keep firing even if there are no more messages
-	 * unless we also acknowledge it at the mailbox level here.
-	 * There's no race if a message comes in between the check in the while
-	 * loop above and the ack below: If a new messages arrives inbetween
-	 * those two the interrupt will just fire again immediately after the
-	 * ack since it's level triggered.
-	 */
-	if (apple_mbox->hw->has_irq_controls) {
-		writel_relaxed(apple_mbox->hw->irq_bit_recv_not_empty,
-			       apple_mbox->regs + apple_mbox->hw->irq_ack);
+	if (mb->irq_disabled) {
+		mb->irq_disabled = false;
+		enable_irq(mb->irq_cpu_to_iop_empty);
 	}
+}
+
+static irqreturn_t apple_mailbox_irq_cpu_to_iop_empty(int irq, void *ptr)
+{
+	struct apple_mailbox *mb = ptr;
+	unsigned long flags;
+	bool sent = false;
+
+	if (!apple_mailbox_cpu_to_iop_empty(mb))
+		return IRQ_NONE;
+
+	spin_lock_irqsave(&mb->lock, flags);
+	apple_mailbox_disable_irq(mb);
+	sent = mb->busy;
+	mb->busy = false;
+	spin_unlock_irqrestore(&mb->lock, flags);
+
+	if (sent)
+		mbox_chan_txdone(&mb->mbox_chan, 0);
 
 	return IRQ_HANDLED;
 }
 
-static int apple_mbox_chan_startup(struct mbox_chan *chan)
+static irqreturn_t apple_mailbox_irq_iop_to_cpu_nonempty(int irq, void *ptr)
 {
-	struct apple_mbox *apple_mbox = chan->con_priv;
+	struct apple_mailbox *mb = ptr;
+	unsigned long flags;
+	u64 msg_data[2];
 
-	/*
-	 * Only some variants of this mailbox HW provide interrupt control
-	 * at the mailbox level. We therefore need to handle enabling/disabling
-	 * interrupts at the main interrupt controller anyway for hardware that
-	 * doesn't. Just always keep the interrupts we care about enabled at
-	 * the mailbox level so that both hardware revisions behave almost
-	 * the same.
-	 */
-	if (apple_mbox->hw->has_irq_controls) {
-		writel_relaxed(apple_mbox->hw->irq_bit_recv_not_empty |
-				       apple_mbox->hw->irq_bit_send_empty,
-			       apple_mbox->regs + apple_mbox->hw->irq_enable);
+	spin_lock_irqsave(&mb->lock, flags);
+
+	if (apple_mailbox_iop_to_cpu_empty(mb)) {
+		spin_unlock_irqrestore(&mb->lock, flags);
+		return IRQ_NONE;
 	}
 
-	enable_irq(apple_mbox->irq_recv_not_empty);
+	msg_data[0] = readq(mb->reg + REG_RECV_IOP_TO_CPU);
+	msg_data[1] = readq(mb->reg + REG_RECV_IOP_TO_CPU + 8);
+	if (1) dev_err(mb->mbox_controller.dev,
+				   "< %016llx %016llx [%016llx]\n",
+				   msg_data[0], msg_data[1], (u64)mb);
+
+	spin_unlock_irqrestore(&mb->lock, flags);
+
+	mbox_chan_received_data(&mb->mbox_chan, msg_data);
+
+	return IRQ_HANDLED;
+}
+
+static int apple_mailbox_send_data(struct mbox_chan *chan, void *msg)
+{
+	struct apple_mailbox *mb = chan->con_priv;
+	unsigned long flags;
+	int ret = 0;
+
+	spin_lock_irqsave(&mb->lock, flags);
+
+	if (mb->busy) {
+		ret = -EBUSY;
+	} else {
+		if (apple_mailbox_cpu_to_iop_empty(mb)) {
+			apple_mailbox_send_cpu_to_iop(mb, msg);
+			mb->busy = true;
+			apple_mailbox_enable_irq(mb);
+		} else {
+			ret = -EBUSY;
+		}
+	}
+
+	spin_unlock_irqrestore(&mb->lock, flags);
+
+	return ret;
+}
+
+static const struct mbox_chan_ops apple_mailbox_ops = {
+	.send_data = apple_mailbox_send_data,
+};
+
+static int apple_mailbox_probe(struct platform_device *pdev)
+{
+	struct apple_mailbox *mb;
+	struct resource *res;
+	int ret;
+
+	mb = devm_kzalloc(&pdev->dev, sizeof *mb, GFP_KERNEL);
+	if (!mb)
+		return ENOMEM;
+
+	dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	dma_addr_t dmah;
+	dma_alloc_coherent(&pdev->dev, 4096, &dmah, GFP_KERNEL);
+
+	spin_lock_init(&mb->lock);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -ENODEV;
+
+	mb->reg = devm_ioremap_resource(&pdev->dev, res);
+	if (IS_ERR(mb->reg))
+		return PTR_ERR(mb->reg);
+
+	mb->irq_cpu_to_iop_empty = platform_get_irq(pdev, 0);
+	mb->irq_iop_to_cpu_nonempty = platform_get_irq(pdev, 1);
+
+	ret = devm_request_irq(&pdev->dev, mb->irq_cpu_to_iop_empty,
+			       apple_mailbox_irq_cpu_to_iop_empty,
+			       IRQF_NO_AUTOEN,
+			       dev_name(&pdev->dev), mb);
+	if (ret < 0)
+		return ret;
+
+	/* XXX ask marcan whether this is a bug in the AIC driver */
+	irq_set_status_flags(mb->irq_cpu_to_iop_empty, IRQ_DISABLE_UNLAZY);
+	mb->irq_disabled = true;
+
+	ret = devm_request_irq(&pdev->dev, mb->irq_iop_to_cpu_nonempty,
+			       apple_mailbox_irq_iop_to_cpu_nonempty, 0,
+			       dev_name(&pdev->dev), mb);
+	if (ret < 0)
+		return ret;
+
+	mb->mbox_controller.dev = &pdev->dev;
+	mb->mbox_controller.chans = &mb->mbox_chan;
+	mb->mbox_controller.num_chans = 1;
+	mb->mbox_controller.txdone_irq = true;
+	mb->mbox_controller.ops = &apple_mailbox_ops;
+
+	mb->mbox_chan.con_priv = mb;
+
+	ret = devm_mbox_controller_register(&pdev->dev, &mb->mbox_controller);
+	if (ret < 0)
+		return ret;
+
 	return 0;
 }
 
-static void apple_mbox_chan_shutdown(struct mbox_chan *chan)
-{
-	struct apple_mbox *apple_mbox = chan->con_priv;
-
-	disable_irq(apple_mbox->irq_recv_not_empty);
-}
-
-static const struct mbox_chan_ops apple_mbox_ops = {
-	.send_data = apple_mbox_chan_send_data,
-	.startup = apple_mbox_chan_startup,
-	.shutdown = apple_mbox_chan_shutdown,
+static const struct of_device_id apple_mailbox_of_match[] = {
+	{ .compatible = "apple,apple-mailbox" },
+	{ },
 };
+MODULE_DEVICE_TABLE(of, apple_mailbox_of_match);
 
-static struct mbox_chan *apple_mbox_of_xlate(struct mbox_controller *mbox,
-					     const struct of_phandle_args *args)
-{
-	if (args->args_count != 0)
-		return ERR_PTR(-EINVAL);
-
-	return &mbox->chans[0];
-}
-
-static int apple_mbox_probe(struct platform_device *pdev)
-{
-	int ret;
-	const struct of_device_id *match;
-	char *irqname;
-	struct apple_mbox *mbox;
-	struct device *dev = &pdev->dev;
-
-	match = of_match_node(apple_mbox_of_match, pdev->dev.of_node);
-	if (!match)
-		return -EINVAL;
-	if (!match->data)
-		return -EINVAL;
-
-	mbox = devm_kzalloc(dev, sizeof(*mbox), GFP_KERNEL);
-	if (!mbox)
-		return -ENOMEM;
-	platform_set_drvdata(pdev, mbox);
-
-	mbox->dev = dev;
-	mbox->regs = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(mbox->regs))
-		return PTR_ERR(mbox->regs);
-
-	mbox->hw = match->data;
-	mbox->irq_recv_not_empty =
-		platform_get_irq_byname(pdev, "recv-not-empty");
-	if (mbox->irq_recv_not_empty < 0)
-		return -ENODEV;
-
-	mbox->irq_send_empty = platform_get_irq_byname(pdev, "send-empty");
-	if (mbox->irq_send_empty < 0)
-		return -ENODEV;
-
-	mbox->controller.dev = mbox->dev;
-	mbox->controller.num_chans = 1;
-	mbox->controller.chans = &mbox->chan;
-	mbox->controller.ops = &apple_mbox_ops;
-	mbox->controller.txdone_irq = true;
-	mbox->controller.of_xlate = apple_mbox_of_xlate;
-	mbox->chan.con_priv = mbox;
-
-	irqname = devm_kasprintf(dev, GFP_KERNEL, "%s-recv", dev_name(dev));
-	if (!irqname)
-		return -ENOMEM;
-
-	ret = devm_request_threaded_irq(dev, mbox->irq_recv_not_empty, NULL,
-					apple_mbox_recv_irq,
-					IRQF_NO_AUTOEN | IRQF_ONESHOT, irqname,
-					mbox);
-	if (ret)
-		return ret;
-
-	irqname = devm_kasprintf(dev, GFP_KERNEL, "%s-send", dev_name(dev));
-	if (!irqname)
-		return -ENOMEM;
-
-	ret = devm_request_irq(dev, mbox->irq_send_empty,
-			       apple_mbox_send_empty_irq, IRQF_NO_AUTOEN,
-			       irqname, mbox);
-	if (ret)
-		return ret;
-
-	return devm_mbox_controller_register(dev, &mbox->controller);
-}
-
-static const struct apple_mbox_hw apple_mbox_asc_hw = {
-	.control_full = APPLE_ASC_MBOX_CONTROL_FULL,
-	.control_empty = APPLE_ASC_MBOX_CONTROL_EMPTY,
-
-	.a2i_control = APPLE_ASC_MBOX_A2I_CONTROL,
-	.a2i_send0 = APPLE_ASC_MBOX_A2I_SEND0,
-	.a2i_send1 = APPLE_ASC_MBOX_A2I_SEND1,
-
-	.i2a_control = APPLE_ASC_MBOX_I2A_CONTROL,
-	.i2a_recv0 = APPLE_ASC_MBOX_I2A_RECV0,
-	.i2a_recv1 = APPLE_ASC_MBOX_I2A_RECV1,
-
-	.has_irq_controls = false,
-};
-
-static const struct apple_mbox_hw apple_mbox_m3_hw = {
-	.control_full = APPLE_M3_MBOX_CONTROL_FULL,
-	.control_empty = APPLE_M3_MBOX_CONTROL_EMPTY,
-
-	.a2i_control = APPLE_M3_MBOX_A2I_CONTROL,
-	.a2i_send0 = APPLE_M3_MBOX_A2I_SEND0,
-	.a2i_send1 = APPLE_M3_MBOX_A2I_SEND1,
-
-	.i2a_control = APPLE_M3_MBOX_I2A_CONTROL,
-	.i2a_recv0 = APPLE_M3_MBOX_I2A_RECV0,
-	.i2a_recv1 = APPLE_M3_MBOX_I2A_RECV1,
-
-	.has_irq_controls = true,
-	.irq_enable = APPLE_M3_MBOX_IRQ_ENABLE,
-	.irq_ack = APPLE_M3_MBOX_IRQ_ACK,
-	.irq_bit_recv_not_empty = APPLE_M3_MBOX_IRQ_I2A_NOT_EMPTY,
-	.irq_bit_send_empty = APPLE_M3_MBOX_IRQ_A2I_EMPTY,
-};
-
-static const struct of_device_id apple_mbox_of_match[] = {
-	{ .compatible = "apple,t8103-asc-mailbox", .data = &apple_mbox_asc_hw },
-	{ .compatible = "apple,t8103-m3-mailbox", .data = &apple_mbox_m3_hw },
-	{}
-};
-MODULE_DEVICE_TABLE(of, apple_mbox_of_match);
-
-static struct platform_driver apple_mbox_driver = {
+static struct platform_driver apple_mailbox_platform_driver = {
 	.driver = {
 		.name = "apple-mailbox",
-		.of_match_table = apple_mbox_of_match,
+		.of_match_table = apple_mailbox_of_match,
 	},
-	.probe = apple_mbox_probe,
+	.probe = apple_mailbox_probe,
 };
-module_platform_driver(apple_mbox_driver);
-
-MODULE_LICENSE("Dual MIT/GPL");
-MODULE_AUTHOR("Sven Peter <sven@svenpeter.dev>");
-MODULE_DESCRIPTION("Apple Mailbox driver");
+module_platform_driver(apple_mailbox_platform_driver);
+MODULE_DESCRIPTION("Apple M1 mailbox driver");
+MODULE_LICENSE("GPL");
