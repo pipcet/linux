@@ -85,9 +85,15 @@
 		};
 	};
 
+	fiq: interrupt-controller {
+	        compatible = "apple,fiq";
+		#interrupt-cells = <3>;
+		interrupt-controller;
+	};
+
 	timer {
 		compatible = "arm,armv8-timer";
-		interrupt-parent = <&aic>;
+		interrupt-parent = <&fiq>;
 		interrupt-names = "phys", "virt", "hyp-phys", "hyp-virt";
 		interrupts = <AIC_FIQ AIC_TMR_GUEST_PHYS IRQ_TYPE_LEVEL_HIGH>,
 			     <AIC_FIQ AIC_TMR_GUEST_VIRT IRQ_TYPE_LEVEL_HIGH>,
