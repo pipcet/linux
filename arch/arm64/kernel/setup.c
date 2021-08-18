@@ -31,6 +31,7 @@
 #include <linux/psci.h>
 #include <linux/sched/task.h>
 #include <linux/mm.h>
+#include <linux/libfdt.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -51,6 +52,10 @@
 #include <asm/efi.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/mmu_context.h>
+
+#ifdef CONFIG_BUILTIN_DEVICE_TREE_TEMPLATE
+#include CONFIG_DEVICE_TREE_TEMPLATE
+#endif
 
 static int num_standard_resources;
 static struct resource *standard_resources;
@@ -178,12 +183,55 @@ asmlinkage void __init early_fdt_map(u64 dt_phys)
 	early_fdt_ptr = fixmap_remap_fdt(dt_phys, &fdt_size, PAGE_KERNEL);
 }
 
+struct apple_bootargs {
+	u64 header;
+	u64 virt_base;
+	u64 phys_base;
+	u64 mem_size;
+	u64 start_of_usable_memory;
+	struct {
+		u64 phys_base;
+		u64 unknown;
+		u64 stride;
+		u64 width;
+		u64 height;
+		u64 depth;
+	} framebuffer;
+	u64 machine_type;
+	u64 adt_virt_base;
+	u32 adt_size;
+	char cmdline[608];
+	u64 bootflags;
+	u64 mem_size_actual;
+};
+
+#ifdef CONFIG_BUILTIN_DEVICE_TREE_TEMPLATE
+static void __init fixup_fdt(u64 bootargs_phys, u64 base) __attribute__((__noinline__));
+static void __init fixup_fdt(u64 bootargs_phys, u64 base)
+{
+	struct apple_bootargs *bootargs =
+		fixmap_remap_bootargs(bootargs_phys, PAGE_KERNEL);
+
+	FDT_INIT();
+}
+#else
+#define fixup_fdt(bootargs_phys, base) while (1)
+#define fdt NULL
+#endif
+
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size;
-	void *dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
+	void *dt_virt = NULL;
 	const char *name;
 
+	if (!dt_phys) {
+	        fixup_fdt(boot_args[1], boot_args[2]);
+		early_init_dt_scan(fdt);
+		return;
+	}
+
+	dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
 
