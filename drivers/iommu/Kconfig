@@ -304,6 +304,14 @@ config APPLE_DART
 
 	  Say Y here if you are using an Apple SoC.
 
+config APPLE_DART_IOMMU
+	tristate "Apple ARM SoC DART IOMMU"
+	depends on ARCH_APPLE
+	select ARM_DMA_USE_IOMMU
+	select IOMMU_API
+	help
+	  Support for DART IOMMU on Apple ARM SoCs.
+
 # ARM IOMMU support
 config ARM_SMMU
 	tristate "ARM Ltd. System MMU (SMMU) Support"

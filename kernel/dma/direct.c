@@ -71,6 +71,7 @@ static bool dma_coherent_ok(struct device *dev, phys_addr_t phys, size_t size)
 
 	if (dma_addr == DMA_MAPPING_ERROR)
 		return false;
+	return true;
 	return dma_addr + size - 1 <=
 		min_not_zero(dev->coherent_dma_mask, dev->bus_dma_limit);
 }

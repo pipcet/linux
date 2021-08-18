@@ -495,6 +495,7 @@ err_ctl_stop:
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tb_domain_add);
 
 /**
  * tb_domain_remove() - Removes and releases a domain
@@ -515,6 +516,7 @@ void tb_domain_remove(struct tb *tb)
 	flush_workqueue(tb->wq);
 	device_unregister(&tb->dev);
 }
+EXPORT_SYMBOL_GPL(tb_domain_remove);
 
 /**
  * tb_domain_suspend_noirq() - Suspend a domain
@@ -540,6 +542,7 @@ int tb_domain_suspend_noirq(struct tb *tb)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tb_domain_suspend_noirq);
 
 /**
  * tb_domain_resume_noirq() - Resume a domain
@@ -560,11 +563,13 @@ int tb_domain_resume_noirq(struct tb *tb)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tb_domain_resume_noirq);
 
 int tb_domain_suspend(struct tb *tb)
 {
 	return tb->cm_ops->suspend ? tb->cm_ops->suspend(tb) : 0;
 }
+EXPORT_SYMBOL_GPL(tb_domain_suspend);
 
 int tb_domain_freeze_noirq(struct tb *tb)
 {
@@ -579,6 +584,7 @@ int tb_domain_freeze_noirq(struct tb *tb)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tb_domain_freeze_noirq);
 
 int tb_domain_thaw_noirq(struct tb *tb)
 {
@@ -592,12 +598,14 @@ int tb_domain_thaw_noirq(struct tb *tb)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tb_domain_thaw_noirq);
 
 void tb_domain_complete(struct tb *tb)
 {
 	if (tb->cm_ops->complete)
 		tb->cm_ops->complete(tb);
 }
+EXPORT_SYMBOL_GPL(tb_domain_complete);
 
 int tb_domain_runtime_suspend(struct tb *tb)
 {
@@ -609,6 +617,7 @@ int tb_domain_runtime_suspend(struct tb *tb)
 	tb_ctl_stop(tb->ctl);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(tb_domain_runtime_suspend);
 
 int tb_domain_runtime_resume(struct tb *tb)
 {
@@ -620,6 +629,7 @@ int tb_domain_runtime_resume(struct tb *tb)
 	}
 	return 0;
 }
+EXPORT_SYMBOL_GPL(tb_domain_runtime_resume);
 
 /**
  * tb_domain_disapprove_switch() - Disapprove switch
@@ -900,6 +910,7 @@ err_acpi:
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(tb_domain_init);
 
 void tb_domain_exit(void)
 {
@@ -911,3 +922,4 @@ void tb_domain_exit(void)
 	tb_debugfs_exit();
 	tb_test_exit();
 }
+EXPORT_SYMBOL_GPL(tb_domain_exit);

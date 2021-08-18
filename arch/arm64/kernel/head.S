@@ -90,6 +90,7 @@
 	 */
 SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
+	bl	init_cpu
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	adrp	x23, __PHYS_OFFSET
 	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
@@ -623,7 +624,235 @@ SYM_FUNC_END(secondary_holding_pen)
 	 * Secondary entry point that jumps straight into the kernel. Only to
 	 * be used where CPUs are brought online dynamically by the kernel.
 	 */
+#define SR_H13_MIGSTS		s3_4_c15_c0_4
+#define SR_H13_HID0		s3_0_c15_c0_0
+#define SR_H13_HID1		s3_0_c15_c1_0
+#define SR_H13_HID3		s3_0_c15_c3_0
+#define SR_H13_HID4		s3_0_c15_c4_0
+#define SR_H13_EHID4		s3_0_c15_c4_1
+#define SR_H13_HID5		s3_0_c15_c5_0
+#define SR_H13_HID6		s3_0_c15_c6_0
+#define SR_H13_HID7		s3_0_c15_c7_0
+#define SR_H13_HID9		s3_0_c15_c9_0
+#define SR_H13_EHID10		s3_0_c15_c10_1
+#define SR_H13_HID11		s3_0_c15_c11_0
+#define SR_H13_CYC_CFG		s3_5_c15_c4_0
+#define SR_H13_CYC_OVRD		s3_5_c15_c5_0
+#define SR_H13_LLC_ERR_STS	s3_3_c15_c8_0
+#define SR_H13_LLC_ERR_ADR	s3_3_c15_c9_0
+#define SR_H13_LLC_ERR_INF	s3_3_c15_c10_0
+#define SR_H13_LSU_ERR_STS	s3_3_c15_c2_0
+#define SR_H13_LSU_ERR_STS_P	s3_3_c15_c0_0
+#define SR_H13_FED_ERR_STS	s3_4_c15_c0_2
+#define SR_H13_FED_ERR_STS_P	s3_4_c15_c0_0
+#define SR_H13_MMU_ERR_STS	s3_6_c15_c2_0
+#define SR_H13_MMU_ERR_STS_P	s3_6_c15_c0_0
+#define SR_H13_DPC_ERR_STS	s3_5_c15_c0_5
+#define SR_H13_KTRR_LOCK	s3_4_c15_c2_2
+#define SR_H13_KTRR_MODE	s3_4_c15_c2_5
+#define SR_H13_KTRR_LOWER	s3_4_c15_c2_3
+#define SR_H13_KTRR_UPPER	s3_4_c15_c2_4
+
+#include "m1n1-chickens.S"
+
+cpuinit:
+    msr oslar_el1, xzr
+
+    mrs x18, midr_el1
+    and x18, x18, #0xfff0
+    cmp x18, #0x0220
+    beq cpuinit_h13e
+    cmp x18, #0x0230
+    beq cpuinit_h13p
+
+    ret
+
+cpuinit_h13e:
+    msr oslar_el1, xzr
+    mov x0, #1
+    msr s3_6_c15_c1_0, x0
+    tlbi vmalle1
+    ldr x0, =0x2020a505f020f0f0
+    msr s3_6_c15_c1_6, x0
+    msr s3_6_c15_c1_0, xzr
+    tlbi vmalle1
+1:  mrs x0, s3_6_c15_c12_4
+    tbz x0, #0, 1b
+    mrs x0, SR_H13_MIGSTS
+    bic x0, x0, #6
+    orr x0, x0, #0x10
+    orr x0, x0, #0x1
+    msr SR_H13_MIGSTS, x0
+    mrs x0, SR_H13_MIGSTS
+    tbnz x0, #4, 1f
+    orr x0, x0, #2
+    msr SR_H13_MIGSTS, x0
+1:  mrs x0, SR_H13_EHID4
+    orr x0, x0, #0x800
+    orr x0, x0, #0x100000000000
+    msr SR_H13_EHID4, x0
+    mrs x0, SR_H13_HID5
+    orr x0, x0, #0x2000000000000000
+    msr SR_H13_HID5, x0
+    mrs x0, SR_H13_EHID10
+    orr x0, x0, #0x100000000
+    orr x0, x0, #0x2000000000000
+    msr SR_H13_EHID10, x0
+    mrs x0, s3_0_c15_c1_2
+    orr x0, x0, #0x100
+    msr s3_0_c15_c1_2, x0
+    mrs x0, s3_0_c15_c9_1
+    bic x0, x0, #0x20
+    msr s3_0_c15_c9_1, x0
+    mrs x0, s3_0_c15_c1_2
+    orr x0, x0, #0x8000
+    msr s3_0_c15_c1_2, x0
+    mrs x0, s3_0_c15_c1_2
+    orr x0, x0, #0x10000
+    msr s3_0_c15_c1_2, x0
+    mrs x0, s3_0_c15_c1_2
+    orr x0, x0, #0x600000
+    msr s3_0_c15_c1_2, x0
+    mrs x0, mpidr_el1
+    and x0, x0, #3
+    msr s3_4_c15_c5_0, x0
+    mov x0, #0x100
+    msr s3_4_c15_c1_4, x0
+    mrs x0, SR_H13_CYC_OVRD
+    bic x0, x0, #0xf00000
+    msr SR_H13_CYC_OVRD, x0
+    mrs x0, actlr_el1
+    orr x0, x0, #0x200 /* something to do with dsb? */
+    msr actlr_el1, x0
+    mrs x0, SR_H13_CYC_CFG
+    orr x0, x0, #12
+    msr SR_H13_CYC_CFG, x0
+    msr SR_H13_LLC_ERR_STS, xzr
+
+    ret
+
+cpuinit_h13p:
+    msr oslar_el1, xzr
+    mov x0, #1
+    msr s3_6_c15_c1_0, x0
+    tlbi vmalle1
+    ldr x0, =0x2020a505f020f0f0
+    msr s3_6_c15_c1_6, x0
+    msr s3_6_c15_c1_0, xzr
+    tlbi vmalle1
+    mrs x0, s3_0_c15_c14_0
+    bic x0, x0, 0xf000000000000000
+    orr x0, x0, 0xc000000000000000
+    msr s3_0_c15_c14_0, x0
+    mrs x0, s3_0_c15_c15_0
+    orr x0, x0, 0x100000000
+    msr s3_0_c15_c15_0, x0
+1:  mrs x0, s3_6_c15_c12_4
+    tbz x0, #0, 1b
+    mrs x0, SR_H13_MIGSTS
+    bic x0, x0, #6
+    orr x0, x0, #0x10
+    orr x0, x0, #0x1
+    msr SR_H13_MIGSTS, x0
+    mrs x0, SR_H13_MIGSTS
+    tbnz x0, #4, 1f
+    orr x0, x0, #2
+    msr SR_H13_MIGSTS, x0
+1:  mrs x0, SR_H13_HID4
+    orr x0, x0, #0x800
+    orr x0, x0, #0x100000000000
+    msr SR_H13_HID4, x0
+    mrs x0, SR_H13_HID5
+    orr x0, x0, #0x2000000000000000
+    msr SR_H13_HID5, x0
+    mrs x0, s3_0_c15_c14_0
+    bic x0, x0, #0x3c000
+    orr x0, x0, #0x10000
+    msr s3_0_c15_c14_0, x0
+    mrs x0, SR_H13_HID0
+    orr x0, x0, #0x200000000000
+    msr SR_H13_HID0, x0
+    mrs x0, SR_H13_HID3
+    bic x0, x0, #0x8000000000000000
+    bic x0, x0, #0x100000000000
+    msr SR_H13_HID3, x0
+    mrs x0, SR_H13_HID1
+    orr x0, x0, #0x40000000000000
+    msr SR_H13_HID1, x0
+    mrs x0, s3_0_c15_c15_2
+    orr x0, x0, #0x100000000000000
+    orr x0, x0, #0x800000000000000
+    orr x0, x0, #0x2000000000000000
+    orr x0, x0, #0x4000000000000000
+    msr s3_0_c15_c15_2, x0
+    mrs x0, SR_H13_HID9
+    orr x0, x0, #0x4000000
+    msr SR_H13_HID9, x0
+    mrs x0, SR_H13_HID4
+    orr x0, x0, #0x30000000000
+    msr SR_H13_HID4, x0
+    mrs x0, SR_H13_HID11
+    orr x0, x0, #0x800000000000000
+    msr SR_H13_HID11, x0
+    mrs x0, SR_H13_HID0
+    orr x0, x0, #0x10000000
+    orr x0, x0, #0x1000000000
+    msr SR_H13_HID0, x0
+    mrs x0, SR_H13_HID6
+    bic x0, x0, #0x3e0
+    msr SR_H13_HID6, x0
+    mrs x0, SR_H13_HID7
+    orr x0, x0, #0x100000
+    orr x0, x0, #0x80000
+    orr x0, x0, #0x3000000
+    msr SR_H13_HID7, x0
+    mrs x0, SR_H13_HID9
+    orr x0, x0, #0x1000000000000
+    orr x0, x0, #0x20000000
+    msr SR_H13_HID9, x0
+    mrs x0, s3_0_c15_c11_2
+    orr x0, x0, #0x4000
+    msr s3_0_c15_c11_2, x0
+    mrs x0, s3_0_c15_c1_3
+    bic x0, x0, #0x80000
+    msr s3_0_c15_c1_3, x0
+    mrs x0, SR_H13_HID4
+    orr x0, x0, #0x2000000000000
+    orr x0, x0, #0x20000000000000
+    msr SR_H13_HID4, x0
+    mrs x0, SR_H13_HID9
+    orr x0, x0, #0x80000000000000
+    msr SR_H13_HID9, x0
+    mrs x0, SR_H13_HID11
+    orr x0, x0, #0x8000
+    msr SR_H13_HID11, x0
+    mrs x0, SR_H13_HID1
+    orr x0, x0, #0x400000000000000
+    orr x0, x0, #0x1000000000000000
+    msr SR_H13_HID1, x0
+    mrs x0, s3_0_c15_c1_3
+    orr x0, x0, #0x2000000000000
+    msr s3_0_c15_c1_3, x0
+    mrs x0, mpidr_el1
+    and x0, x0, #3
+    msr s3_4_c15_c5_0, x0
+    mov x0, #0x100
+    msr s3_4_c15_c1_4, x0
+    mrs x0, SR_H13_CYC_OVRD
+    bic x0, x0, #0xf00000
+    msr SR_H13_CYC_OVRD, x0
+    mrs x0, actlr_el1
+    orr x0, x0, #0x200 /* something to do with dsb? */
+    msr actlr_el1, x0
+    mrs x0, SR_H13_CYC_CFG
+    orr x0, x0, #12
+    msr SR_H13_CYC_CFG, x0
+    msr SR_H13_LLC_ERR_STS, xzr
+
+    ret
+
 SYM_FUNC_START(secondary_entry)
+	bl 	init_cpu
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	bl	set_cpu_boot_mode_flag
 	b	secondary_startup

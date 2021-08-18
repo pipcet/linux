@@ -990,6 +990,14 @@ config VISCONTI_WATCHDOG
 	  Say Y here to include support for the watchdog timer in Toshiba
 	  Visconti SoCs.
 
+config APPLE_M1_WATCHDOG
+	tristate "Apple M1 watchdog timer support"
+	depends on ARCH_APPLE && OF || COMPILE_TEST
+	select WATCHDOG_CORE
+	help
+	  Say Y here to include support for the watchdog timer on Apple M1
+	  systems.
+
 config MSC313E_WATCHDOG
 	tristate "MStar MSC313e watchdog"
 	depends on ARCH_MSTARV7 || COMPILE_TEST

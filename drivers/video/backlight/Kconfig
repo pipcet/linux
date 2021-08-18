@@ -275,6 +275,13 @@ config BACKLIGHT_APPLE
 	  If you have an Intel-based Apple say Y to enable a driver for its
 	  backlight.
 
+config BACKLIGHT_APPLE_M1
+        tristate "Apple M1 Backlight Driver"
+	depends on ARCH_APPLE
+	help
+	  If you have an M1-based Apple laptop, say Y to enable a driver for
+	  its backlight.
+
 config BACKLIGHT_TOSA
 	tristate "Sharp SL-6000 Backlight Driver"
 	depends on I2C && MACH_TOSA && LCD_TOSA

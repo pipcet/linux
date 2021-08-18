@@ -248,7 +248,21 @@ populate_shared_memory:
 		 *       or it can pointers to struct page's
 		 */
 
-		copy_amount = new_op->downcall.resp.io.amt_complete;
+		/*
+		 * When reading, readahead_size will only be zero when
+		 * we're doing O_DIRECT, otherwise we got here from
+		 * orangefs_readpage.
+		 *
+		 * If we got here from orangefs_readpage we want to
+		 * copy either a page or the whole file into the io
+		 * vector, whichever is smaller.
+		 */
+		if (readahead_size)
+			copy_amount =
+				min(new_op->downcall.resp.io.amt_complete,
+					(__s64)PAGE_SIZE);
+		else
+			copy_amount = new_op->downcall.resp.io.amt_complete;
 
 		ret = orangefs_bufmap_copy_to_iovec(iter, buffer_index,
 			copy_amount);
@@ -269,11 +283,19 @@ populate_shared_memory:
 
 out:
 	if (buffer_index >= 0) {
-		orangefs_bufmap_put(buffer_index);
-		gossip_debug(GOSSIP_FILE_DEBUG,
-			"%s(%pU): PUT buffer_index %d\n",
-			__func__, handle, buffer_index);
-		buffer_index = -1;
+		if ((readahead_size) && (type == ORANGEFS_IO_READ)) {
+			/* readpage */
+			*index_return = buffer_index;
+			gossip_debug(GOSSIP_FILE_DEBUG,
+				"%s: hold on to buffer_index :%d:\n",
+				__func__, buffer_index);
+		} else {
+			/* O_DIRECT */
+			orangefs_bufmap_put(buffer_index);
+			gossip_debug(GOSSIP_FILE_DEBUG,
+				"%s(%pU): PUT buffer_index %d\n",
+				__func__, handle, buffer_index);
+		}
 	}
 	op_release(new_op);
 	return ret;

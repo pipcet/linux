@@ -31,6 +31,7 @@
 #include <linux/psci.h>
 #include <linux/sched/task.h>
 #include <linux/mm.h>
+#include <linux/libfdt.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -51,6 +52,10 @@
 #include <asm/efi.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/mmu_context.h>
+
+#ifdef CONFIG_BUILTIN_DEVICE_TREE_TEMPLATE
+#include CONFIG_DEVICE_TREE_TEMPLATE
+#endif
 
 static int num_standard_resources;
 static struct resource *standard_resources;
@@ -178,12 +183,151 @@ asmlinkage void __init early_fdt_map(u64 dt_phys)
 	early_fdt_ptr = fixmap_remap_fdt(dt_phys, &fdt_size, PAGE_KERNEL);
 }
 
+#define APPLE_BA_VIRT_BASE        0x08
+#define APPLE_BA_PHYS_BASE        0x10
+#define APPLE_BA_MEM_SIZE         0x18
+#define APPLE_BA_KERNEL_TOM       0x20
+#define APPLE_BA_FB_PHYS_BASE     0x28
+#define APPLE_BA_FB_STRIDE        0x38
+#define APPLE_BA_FB_WIDTH         0x40
+#define APPLE_BA_FB_HEIGHT        0x48
+#define APPLE_BA_FB_DEPTH         0x50
+#define APPLE_BA_DTREE_VIRT       0x60
+#define APPLE_BA_DTREE_SIZE       0x68
+#define APPLE_BA_MEM_SIZE_ACTUAL 0x2d8
+
+static void fill_in_framebuffer(char *fdt, void *ba_virt)
+{
+	u64 phys_base = *(u64 *)(ba_virt + APPLE_BA_FB_PHYS_BASE);
+	u64 stride = *(u64 *)(ba_virt + APPLE_BA_FB_STRIDE);
+	u64 width = *(u64 *)(ba_virt + APPLE_BA_FB_WIDTH);
+	u64 height = *(u64 *)(ba_virt + APPLE_BA_FB_HEIGHT);
+	u64 depth = *(u64 *)(ba_virt + APPLE_BA_FB_DEPTH);
+	char * p;
+	*(u32 *)fdt = cpu_to_be32(phys_base>>32);
+	*(u32 *)(fdt + 4) = cpu_to_be32(phys_base&0xffffffff);
+	*(u32 *)(fdt + 8) = cpu_to_be32(0);
+	*(u32 *)(fdt + 12) = cpu_to_be32(stride*height);
+	for (p = fdt; p < fdt + PAGE_SIZE; p++) {
+		if (!strcmp(p, "HEI")) {
+			*(u32 *)p = cpu_to_be32(height);
+			break;
+		}
+	}
+	for (p = fdt; p < fdt + PAGE_SIZE; p++) {
+		if (!strcmp(p, "STR")) {
+			*(u32 *)p = cpu_to_be32(stride);
+			break;
+		}
+	}
+	for (p = fdt; p < fdt + PAGE_SIZE; p++) {
+		if (!strcmp(p, "WID")) {
+			*(u32 *)p = cpu_to_be32(width);
+			break;
+		}
+	}
+}
+struct apple_bootargs {
+	u64 header;
+	u64 virt_base;
+	u64 phys_base;
+	u64 mem_size;
+	u64 start_of_usable_memory;
+	struct {
+		u64 phys_base;
+		u64 unknown;
+		u64 stride;
+		u64 width;
+		u64 height;
+		u64 depth;
+	} framebuffer;
+	u64 machine_type;
+	u64 adt_virt_base;
+	u32 adt_size;
+	char cmdline[608];
+	u64 bootflags;
+	u64 mem_size_actual;
+};
+
+#ifdef CONFIG_BUILTIN_DEVICE_TREE_TEMPLATE
+static void __init fixup_fdt(u64 bootargs_phys, u64 base) __attribute__((__noinline__));
+static void __init fixup_fdt(u64 bootargs_phys, u64 base)
+{
+	void *ba_virt = fixmap_remap_bootargs(bootargs_phys, PAGE_KERNEL);
+	u64 adt = ((*(uint64_t *)(ba_virt + APPLE_BA_DTREE_VIRT)) -
+		   (*(uint64_t *)(ba_virt + APPLE_BA_VIRT_BASE)) +
+		   (*(uint64_t *)(ba_virt + APPLE_BA_PHYS_BASE)));
+	u64 adtsize = (*(uint32_t *)(ba_virt + APPLE_BA_DTREE_SIZE));
+	u64 ksize = (*(uint64_t *)(ba_virt + APPLE_BA_KERNEL_TOM));
+	u64 memsize = (*(uint64_t *)(ba_virt + APPLE_BA_MEM_SIZE));
+	u64 phys_base = *(uint64_t *)(ba_virt + APPLE_BA_PHYS_BASE);
+	int i;
+	u64 memsize_actual = 0x400000000;
+
+	char *p;
+	for (p = (void*)fdt; (void *)p < (void *)fdt + sizeof(fdt); p++)
+		if (strcmp(p, "bootargsgohere!") == 0) {
+			u32 *p2 = (u32 *)p;
+			p2[0] = cpu_to_be32(bootargs_phys>>32);
+			p2[1] = cpu_to_be32(bootargs_phys&0xffffffff);
+			p2[2] = cpu_to_be32(0);
+			p2[3] = cpu_to_be32(0x4000);
+		} else if (strcmp(p, "framebuffer!!!!") == 0) {
+			fill_in_framebuffer(p, ba_virt);
+		} else if (strcmp(p, "basegoeshere!!!") == 0) {
+			u32 *p2 = (u32 *)p;
+			p2[0] = cpu_to_be32(base>>32);
+			p2[1] = cpu_to_be32(base&0xffffffff);
+			p2[2] = cpu_to_be32(0);
+			p2[3] = cpu_to_be32(0x4000);
+		} else if (strcmp(p, "adtgoeshere!!!!") == 0) {
+			u32 *p2 = (u32 *)p;
+			p2[0] = cpu_to_be32(adt>>32);
+			p2[1] = cpu_to_be32(adt&0xffffffff);
+			p2[2] = cpu_to_be32(adtsize >> 32);
+			p2[3] = cpu_to_be32(adtsize&0xffffffff);
+		} else if (strcmp(p, "kmemgoeshere!!!") == 0) {
+			u32 *p2 = (u32 *)p;
+			p2[0] = cpu_to_be32(0x8);
+			p2[1] = cpu_to_be32(0);
+			p2[2] = cpu_to_be32((ksize >> 32) - 8);
+			p2[3] = cpu_to_be32(ksize&0xffffffff);
+		} else if (strcmp(p, "endofmemory!!!!") == 0) {
+			u32 *p2 = (u32 *)p;
+			p2[0] = cpu_to_be32((memsize + phys_base)>> 32);
+			p2[1] = cpu_to_be32((memsize + phys_base)& 0xffffffff);
+			p2[2] = cpu_to_be32((memsize_actual - memsize) >> 32);
+			p2[3] = cpu_to_be32((memsize_actual - memsize) & 0xffffffff);
+		} else if (strcmp(p, "memorygoeshere!") == 0) {
+			u32 *p2 = (u32 *)p;
+			p2[0] = cpu_to_be32(0x8);
+			p2[1] = cpu_to_be32(0);
+			p2[2] = cpu_to_be32(memsize_actual >> 32);
+			p2[3] = cpu_to_be32(memsize_actual & 0xffffffff);
+		}
+	struct apple_bootargs *bootargs =
+		fixmap_remap_bootargs(bootargs_phys, PAGE_KERNEL);
+
+	FDT_INIT();
+}
+#else
+#define fixup_fdt(bootargs_phys, base) while (1)
+#define fdt NULL
+#endif
+
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size;
-	void *dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
+	void *dt_virt = NULL;
 	const char *name;
 
+	if (!dt_phys) {
+	        fixup_fdt(boot_args[1], boot_args[2]);
+		early_init_dt_scan(fdt);
+		return;
+	}
+
+	dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
 
@@ -193,9 +337,6 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 			"The dtb must be 8-byte aligned and must not exceed 2 MB in size\n"
 			"\nPlease check your bootloader.",
 			&dt_phys, dt_virt);
-
-		while (true)
-			cpu_relax();
 	}
 
 	/* Early fixups are done, map the FDT as read-only now */

@@ -161,7 +161,7 @@ static int __init control_devkmsg(char *str)
 	/*
 	 * Sysctl cannot change it anymore. The kernel command line setting of
 	 * this parameter is to force the setting to be permanent throughout the
-	 * runtime of the system. This is a precation measure against userspace
+	 * runtime of the system. This is a precaution measure against userspace
 	 * trying to be a smarta** and attempting to change it up on us.
 	 */
 	devkmsg_log |= DEVKMSG_LOG_MASK_LOCK;

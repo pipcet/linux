@@ -55,6 +55,7 @@
 #include <asm/processor.h>
 #include <asm/pointer_auth.h>
 #include <asm/stacktrace.h>
+#include <asm/cpu_ops.h>
 #include <asm/switch_to.h>
 #include <asm/system_misc.h>
 

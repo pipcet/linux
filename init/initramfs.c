@@ -495,10 +495,12 @@ static char * __init unpack_to_rootfs(char *buf, unsigned long len)
 		}
 		this_header = 0;
 		decompress = decompress_method(buf, len, &compress_name);
-		pr_debug("Detected %s compressed data\n", compress_name);
+		pr_err("Detected %s compressed data at %016lx\n", compress_name, buf);
 		if (decompress) {
 			int res = decompress(buf, len, NULL, flush_buffer, NULL,
 				   &my_inptr, error);
+			pr_err("error: %016llx, %s\n",
+			       error, error ? error : "unknown");
 			if (res)
 				error("decompressor failed");
 		} else if (compress_name) {
@@ -561,7 +563,7 @@ void __init reserve_initrd_mem(void)
 	phys_addr_t start;
 	unsigned long size;
 
-	/* Ignore the virtul address computed during device tree parsing */
+	/* Ignore the virtual address computed during device tree parsing */
 	initrd_start = initrd_end = 0;
 
 	if (!phys_initrd_size)

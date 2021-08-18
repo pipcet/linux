@@ -139,10 +139,17 @@ enum nvme_quirks {
 	NVME_QUIRK_NO_NS_DESC_LIST		= (1 << 15),
 
 	/*
+	 * Apple's SoC ANS2 controller frontend uses a different
+	 * scheme for submission queues, where instead of rings they
+	 * are arrays and instead of ringing a doorbell one writes
+	 * an index into that array into a FIFO-type register.
+	 */
+	NVME_QUIRK_LINEAR_SQ			= (1 << 16),
+	/*
 	 * The controller does not properly handle DMA addresses over
 	 * 48 bits.
 	 */
-	NVME_QUIRK_DMA_ADDRESS_BITS_48		= (1 << 16),
+	NVME_QUIRK_DMA_ADDRESS_BITS_48		= (1 << 17),
 };
 
 /*

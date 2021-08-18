@@ -48,6 +48,7 @@
 #include <linux/bits.h>
 #include <linux/bitfield.h>
 #include <linux/cpuhotplug.h>
+#include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/irqchip.h>
 #include <linux/irqchip/arm-vgic-info.h>
@@ -216,7 +217,7 @@ static void aic_irq_unmask(struct irq_data *d)
 {
 	struct aic_irq_chip *ic = irq_data_get_irq_chip_data(d);
 
-	aic_ic_write(ic, AIC_MASK_CLR + MASK_REG(d->hwirq),
+	aic_ic_write(ic, AIC_MASK_CLR + MASK_REG(irqd_to_hwirq(d)),
 		     MASK_BIT(irqd_to_hwirq(d)));
 }
 
@@ -234,6 +235,9 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 {
 	struct aic_irq_chip *ic = aic_irqc;
 	u32 event, type, irq;
+	unsigned long flags;
+	static long count;
+	local_irq_save(flags);
 
 	do {
 		/*
@@ -241,6 +245,10 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 		 * need to be ordered after the IRQ fires.
 		 */
 		event = readl(ic->base + AIC_EVENT);
+		if ((count & (count-1)) == 0) {
+			printk("IRQ event %08x\n", event);
+		}
+		count++;
 		type = FIELD_GET(AIC_EVENT_TYPE, event);
 		irq = FIELD_GET(AIC_EVENT_NUM, event);
 
@@ -263,6 +271,7 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 		pr_err_ratelimited("vGIC IRQ fired and not handled by KVM, disabling.\n");
 		sysreg_clear_set_s(SYS_ICH_HCR_EL2, ICH_HCR_EN, 0);
 	}
+	local_irq_restore(flags);
 }
 
 static int aic_irq_set_affinity(struct irq_data *d,
@@ -289,12 +298,13 @@ static int aic_irq_set_type(struct irq_data *d, unsigned int type)
 	 * Some IRQs (e.g. MSIs) implicitly have edge semantics, and we don't
 	 * have a way to find out the type of any given IRQ, so just allow both.
 	 */
-	return (type == IRQ_TYPE_LEVEL_HIGH || type == IRQ_TYPE_EDGE_RISING) ? 0 : -EINVAL;
+	return (type == IRQ_TYPE_LEVEL_HIGH || type == IRQ_TYPE_EDGE_RISING) ? 0 : 0;
 }
 
 static struct irq_chip aic_chip = {
 	.name = "AIC",
 	.irq_mask = aic_irq_mask,
+	.irq_mask_ack = aic_irq_mask,
 	.irq_unmask = aic_irq_unmask,
 	.irq_eoi = aic_irq_eoi,
 	.irq_set_affinity = aic_irq_set_affinity,
@@ -393,11 +403,11 @@ static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
 
 	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
 		handle_domain_irq(aic_irqc->hw_domain,
-				  aic_irqc->nr_hw + AIC_TMR_EL0_PHYS, regs);
+				  aic_irqc->nr_hw, regs);
 
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
 		handle_domain_irq(aic_irqc->hw_domain,
-				  aic_irqc->nr_hw + AIC_TMR_EL0_VIRT, regs);
+				  aic_irqc->nr_hw + 1, regs);
 
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
@@ -405,12 +415,12 @@ static void __exception_irq_entry aic_handle_fiq(struct pt_regs *regs)
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTP_CTL_EL02)))
 			handle_domain_irq(aic_irqc->hw_domain,
-					  aic_irqc->nr_hw + AIC_TMR_EL02_PHYS, regs);
+					  aic_irqc->nr_hw, regs);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTV_CTL_EL02)))
 			handle_domain_irq(aic_irqc->hw_domain,
-					  aic_irqc->nr_hw + AIC_TMR_EL02_VIRT, regs);
+					  aic_irqc->nr_hw + 1, regs);
 	}
 
 	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
@@ -489,7 +499,7 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 	case AIC_FIQ:
 		if (fwspec->param[1] >= AIC_NR_FIQ)
 			return -EINVAL;
-		*hwirq = ic->nr_hw + fwspec->param[1];
+		*hwirq = ic->nr_hw + (fwspec->param[1] & 1);
 
 		/*
 		 * In EL1 the non-redirected registers are the guest's,
@@ -498,10 +508,10 @@ static int aic_irq_domain_translate(struct irq_domain *id,
 		if (!is_kernel_in_hyp_mode()) {
 			switch (fwspec->param[1]) {
 			case AIC_TMR_GUEST_PHYS:
-				*hwirq = ic->nr_hw + AIC_TMR_EL0_PHYS;
+			  *hwirq = ic->nr_hw;
 				break;
 			case AIC_TMR_GUEST_VIRT:
-				*hwirq = ic->nr_hw + AIC_TMR_EL0_VIRT;
+			  *hwirq = ic->nr_hw + 1;
 				break;
 			case AIC_TMR_HV_PHYS:
 			case AIC_TMR_HV_VIRT:
@@ -788,6 +798,17 @@ static int aic_init_cpu(unsigned int cpu)
 	return 0;
 }
 
+void apple_aic_cpu_prepare(unsigned int cpu)
+{
+	struct aic_irq_chip *irqc = aic_irqc;
+	unsigned i;
+
+	for (i = 0; i < irqc->nr_hw; i++)
+		aic_ic_write(irqc, AIC_TARGET_CPU + i * 4,
+			     (aic_ic_read(irqc, AIC_TARGET_CPU + i * 4) |
+			      BIT(cpu)));
+}
+
 static struct gic_kvm_info vgic_info __initdata = {
 	.type			= GIC_V3,
 	.no_maint_irq_mask	= true,
@@ -818,6 +839,10 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	irqc->hw_domain = irq_domain_create_linear(of_node_to_fwnode(node),
 						   irqc->nr_hw + AIC_NR_FIQ,
 						   &aic_irq_domain_ops, irqc);
+
+	for (i = 0; i < irqc->nr_hw; i++)
+		irq_set_status_flags(i, IRQ_DISABLE_UNLAZY);
+	irq_set_default_host(irqc->hw_domain);
 	if (WARN_ON(!irqc->hw_domain)) {
 		iounmap(irqc->base);
 		kfree(irqc);
@@ -852,6 +877,7 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 
 	vgic_set_kvm_info(&vgic_info);
 
+	aic_ic_write(irqc, AIC_CONFIG, (aic_ic_read(irqc, AIC_CONFIG) & ~0xf00000) | 0x700000);
 	pr_info("Initialized with %d IRQs, %d FIQs, %d vIPIs\n",
 		irqc->nr_hw, AIC_NR_FIQ, AIC_NR_SWIPI);
 
