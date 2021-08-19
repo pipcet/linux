@@ -143,6 +143,13 @@ config GPIO_AMDPT
 	  driver for GPIO functionality on Promontory IOHub
 	  Require ACPI ASL code to enumerate as a platform device.
 
+config GPIO_KVBOX
+        tristate "kvbox-based GPIO support"
+	depends on KVBOX
+	select GPIO_GENERIC
+	help
+	  Say Y here to support kvbox-based GPIO pins.
+
 config GPIO_ASPEED
 	tristate "Aspeed GPIO support"
 	depends on (ARCH_ASPEED || COMPILE_TEST) && OF_GPIO
