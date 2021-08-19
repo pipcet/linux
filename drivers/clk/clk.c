@@ -1294,7 +1294,7 @@ static int __init clk_disable_unused(void)
 {
 	struct clk_core *core;
 
-	if (clk_ignore_unused) {
+	if (1 || clk_ignore_unused) {
 		pr_warn("clk: Not disabling unused clocks\n");
 		return 0;
 	}
