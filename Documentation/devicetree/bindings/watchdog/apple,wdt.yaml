@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/watchdog/apple,wdt.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Apple M1 Watchdog Timer Device Tree Bindings
+
+maintainers:
+  - Pip Cet <pipcet@gmail.com>
+
+allOf:
+  - $ref: watchdog.yaml#
+
+properties:
+  compatible:
+    enum:
+      - apple,t8103-wdt
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+required:
+  - compatible
+  - clocks
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    watchdog@3bd20000 {
+        compatible = "apple,t8103-wdt";
+        reg = <0x3bd20000 0x4000>;
+        clocks = <&clk24>;
+    };
