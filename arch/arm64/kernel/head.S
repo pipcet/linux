@@ -90,6 +90,7 @@
 	 */
 SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
+	bl	init_cpu
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	adrp	x23, __PHYS_OFFSET
 	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
@@ -624,7 +625,9 @@ SYM_FUNC_END(secondary_holding_pen)
 	 * Secondary entry point that jumps straight into the kernel. Only to
 	 * be used where CPUs are brought online dynamically by the kernel.
 	 */
+#include "m1n1-chickens.S"
 SYM_FUNC_START(secondary_entry)
+	bl 	init_cpu
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	bl	set_cpu_boot_mode_flag
 	b	secondary_startup
