@@ -1339,6 +1339,50 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	return dt_virt;
 }
 
+void *__init fixmap_remap_bootargs(phys_addr_t ba_phys, pgprot_t prot)
+{
+	/* It's safe to reuse the FIX_FDT map, because we only check for
+	 * bootargs in the absence of an actual FDT. */
+	const u64 ba_virt_base = __fix_to_virt(FIX_FDT);
+	int offset;
+	void *ba_virt;
+
+	/*
+	 * Check whether the physical FDT address is set and meets the minimum
+	 * alignment requirement. Since we are relying on MIN_FDT_ALIGN to be
+	 * at least 8 bytes so that we can always access the magic and size
+	 * fields of the FDT header after mapping the first chunk, double check
+	 * here if that is indeed the case.
+	 */
+	BUILD_BUG_ON(MIN_FDT_ALIGN < 8);
+	if (!ba_phys || ba_phys % MIN_FDT_ALIGN)
+		return NULL;
+
+	/*
+	 * Make sure that the FDT region can be mapped without the need to
+	 * allocate additional translation table pages, so that it is safe
+	 * to call create_mapping_noalloc() this early.
+	 *
+	 * On 64k pages, the FDT will be mapped using PTEs, so we need to
+	 * be in the same PMD as the rest of the fixmap.
+	 * On 4k pages, we'll use section mappings for the FDT so we only
+	 * have to be in the same PUD.
+	 */
+	BUILD_BUG_ON(ba_virt_base % SZ_2M);
+
+	BUILD_BUG_ON(__fix_to_virt(FIX_FDT_END) >> SWAPPER_TABLE_SHIFT !=
+		     __fix_to_virt(FIX_BTMAP_BEGIN) >> SWAPPER_TABLE_SHIFT);
+
+	offset = ba_phys % SWAPPER_BLOCK_SIZE;
+	ba_virt = (void *)ba_virt_base + offset;
+
+	/* map the first chunk so we can read the size from the header */
+	create_mapping_noalloc(round_down(ba_phys, SWAPPER_BLOCK_SIZE),
+			ba_virt_base, SWAPPER_BLOCK_SIZE, prot);
+
+	return ba_virt;
+}
+
 int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
 {
 	pud_t new_pud = pfn_pud(__phys_to_pfn(phys), mk_pud_sect_prot(prot));
