@@ -45,10 +45,10 @@ static int kvbox_make_request(struct kvbox *kvbox, struct kvbox_prop *prop,
 	request->callback = callback;
 	request->priv = priv;
 	list_add(&request->list, &kvbox->requests);
-
 	ret = r(kvbox, prop);
 
 	if (ret < 0) {
+		list_del(&request->list);
 		devm_kfree(kvbox->dev, request);
 		return ret;
 	}
@@ -85,8 +85,6 @@ void kvbox_done(struct kvbox *kvbox)
 	struct kvbox_request *request;
 
 	WARN_ON(list_empty(&kvbox->requests));
-	if (list_empty(&kvbox->requests))
-		return;
 
 	while (!list_empty(&kvbox->requests)) {
 		request = list_first_entry(&kvbox->requests, struct kvbox_request,
