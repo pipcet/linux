@@ -149,9 +149,9 @@ static int apple_ioreport_probe(struct platform_device *pdev)
 	/* XXX */
 	ioreport->endpoint = endpoint;
 
-	ioreport->chan = mbox_request_channel(&ioreport->cl, 0);
 	INIT_WORK(&ioreport->work, apple_ioreport_allocator_func);
 	INIT_LIST_HEAD(&ioreport->queued_messages);
+	ioreport->chan = mbox_request_channel(&ioreport->cl, 0);
 
 	if (IS_ERR(ioreport->chan)) {
 		dev_err(ioreport->dev, "couldn't acquire mailbox channel");
