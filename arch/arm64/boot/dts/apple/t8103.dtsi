@@ -670,26 +670,11 @@
 		};
 	};
 
-	leds {
-		compatible = "pwm-leds";
 
-		kbd-backlight {
-			label = "kbd_backlight";
-			function = LED_FUNCTION_KBD_BACKLIGHT;
-			color = <LED_COLOR_ID_WHITE>;
-			pwm-names = "kbd_backlight";
-			pwms = <&fpwm0 0 1000000>;
-			max-brightness = <255>;
-		};
-	};
-
-#if 1
 	backlight: backlight {
 		compatible = "apple,apple-m1-backlight";
 		max-brightness = <0x20d0000>;
 		mboxes = <&dcp_asc_dcp 0>;
 		power-gpios = <&smc_gpio 1 0>;
 	};
-#endif
-
 };
