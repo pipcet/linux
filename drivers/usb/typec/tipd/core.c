@@ -14,12 +14,15 @@
 #include <linux/interrupt.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/role.h>
+#include <linux/workqueue.h>
+#include <linux/usb/typec_altmode.h>
 
 #include "tps6598x.h"
 #include "trace.h"
 
 /* Register offsets */
 #define TPS_REG_VID			0x00
+#define TPS_REG_PID			0x01
 #define TPS_REG_MODE			0x03
 #define TPS_REG_CMD1			0x08
 #define TPS_REG_DATA1			0x09
@@ -30,14 +33,52 @@
 #define TPS_REG_INT_CLEAR1		0x18
 #define TPS_REG_INT_CLEAR2		0x19
 #define TPS_REG_STATUS			0x1a
+#define TPS_REG_POWER_STATE		0x20
 #define TPS_REG_SYSTEM_CONF		0x28
 #define TPS_REG_CTRL_CONF		0x29
 #define TPS_REG_POWER_STATUS		0x3f
 #define TPS_REG_RX_IDENTITY_SOP		0x48
 #define TPS_REG_DATA_STATUS		0x5f
 
+/* devices used on M1 Macs for Thunderbolt */
+#define PID_CD3217			0x00cd3217
+#define PID_CD3218			0x00cd3218
+
+/* TPS_REG_INT_* bits */
+#define TPS_REG_INT_PLUG_EVENT		BIT(3)
+
+#define TPS_CD321X_INT_MASK		0x04c000000000050full
+#define TPS_CD321X_INT_STATUS_CHG	BIT(8)
+#define TPS_CD321X_INT_DATA_STATUS_CHG	BIT(10)
+
+#define CD321X_SETTLE_MSEC		1000
+
+/* TPS_REG_STATUS bits */
+#define TPS_STATUS_PLUG_PRESENT		BIT(0)
+#define TPS_STATUS_ORIENTATION(s)	(!!((s) & BIT(4)))
+#define TPS_STATUS_PORTROLE(s)		(!!((s) & BIT(5)))
+#define TPS_STATUS_DATAROLE(s)		(!!((s) & BIT(6)))
+#define TPS_STATUS_VCONN(s)		(!!((s) & BIT(7)))
+
+/* TPS_REG_POWER_STATE values */
+#define TPS_POWER_STATE_S0		0
+#define TPS_POWER_STATE_BOOT		7
+
 /* TPS_REG_SYSTEM_CONF bits */
 #define TPS_SYSCONF_PORTINFO(c)		((c) & 7)
+
+/* TPS_REG_DATA_STATUS bits */
+#define TPS_DATA_STATUS_CABLE_GEN_M	GENMASK(29,28)
+#define TPS_DATA_STATUS_CABLE_GEN_S	28
+#define TPS_DATA_STATUS_CABLE_SPEED_M	GENMASK(27,25)
+#define TPS_DATA_STATUS_CABLE_SPEED_S	25
+#define TPS_DATA_STATUS_CABLE_LINKTRN	BIT(20)
+#define TPS_DATA_STATUS_CABLE_OPTICAL	BIT(18)
+#define TPS_DATA_STATUS_CABLE_LEGACY	BIT(17)
+#define TPS_DATA_STATUS_TBT_CONNECTION	BIT(16)
+#define TPS_DATA_STATUS_USB3_CONNECTION	BIT(5)
+#define TPS_DATA_STATUS_USB2_CONNECTION	BIT(4)
+#define TPS_DATA_STATUS_CABLE_ACTIVE	BIT(2)
 
 enum {
 	TPS_PORTINFO_SINK,
@@ -81,6 +122,10 @@ struct tps6598x {
 	struct regmap *regmap;
 	struct mutex lock; /* device lock */
 	u8 i2c_protocol:1;
+	u8 i2c_no_long:1;
+	u8 just_init:1;
+	u8 cd321x_support:1;
+	u32 product_id;
 
 	struct typec_port *port;
 	struct typec_partner *partner;
@@ -91,6 +136,11 @@ struct tps6598x {
 	struct power_supply *psy;
 	struct power_supply_desc psy_desc;
 	enum power_supply_usb_type usb_type;
+	u32 pwr_status, data_status;
+
+	struct typec_usb4_cable cable_info;
+
+	struct delayed_work cd321x_status_work;
 };
 
 static enum power_supply_property tps6598x_psy_props[] = {
@@ -123,7 +173,7 @@ tps6598x_block_read(struct tps6598x *tps, u8 reg, void *val, size_t len)
 	if (!tps->i2c_protocol)
 		return regmap_raw_read(tps->regmap, reg, val, len);
 
-	ret = regmap_raw_read(tps->regmap, reg, data, sizeof(data));
+	ret = regmap_raw_read(tps->regmap, reg, data, tps->i2c_no_long ? len + 1 : sizeof(data));
 	if (ret)
 		return ret;
 
@@ -145,7 +195,12 @@ static int tps6598x_block_write(struct tps6598x *tps, u8 reg,
 	data[0] = len;
 	memcpy(&data[1], val, len);
 
-	return regmap_raw_write(tps->regmap, reg, data, sizeof(data));
+	return regmap_raw_write(tps->regmap, reg, data, tps->i2c_no_long ? len + 1 : sizeof(data));
+}
+
+static inline int tps6598x_read8(struct tps6598x *tps, u8 reg, u8 *val)
+{
+	return tps6598x_block_read(tps, reg, val, sizeof(u8));
 }
 
 static inline int tps6598x_read16(struct tps6598x *tps, u8 reg, u16 *val)
@@ -221,14 +276,26 @@ static int tps6598x_connect(struct tps6598x *tps, u32 status)
 	struct typec_partner_desc desc;
 	enum typec_pwr_opmode mode;
 	u16 pwr_status;
+	u32 data_status;
+	unsigned long data_mode;
 	int ret;
-
-	if (tps->partner)
-		return 0;
 
 	ret = tps6598x_read16(tps, TPS_REG_POWER_STATUS, &pwr_status);
 	if (ret < 0)
 		return ret;
+
+	ret = tps6598x_read32(tps, TPS_REG_DATA_STATUS, &data_status);
+	if (ret)
+		return ret;
+
+	if (tps->partner) {
+		if (tps->pwr_status == pwr_status && tps->data_status == data_status)
+			return 0;
+
+		if (!IS_ERR(tps->partner))
+			typec_unregister_partner(tps->partner);
+		tps->partner = NULL;
+	}
 
 	mode = TPS_POWER_STATUS_PWROPMODE(pwr_status);
 
@@ -243,10 +310,37 @@ static int tps6598x_connect(struct tps6598x *tps, u32 status)
 		desc.identity = &tps->partner_identity;
 	}
 
+	if(tps->cd321x_support && (data_status & TPS_DATA_STATUS_TBT_CONNECTION)) {
+		data_mode = TYPEC_MODE_USB4;
+		tps->cable_info.gen = (data_status & TPS_DATA_STATUS_CABLE_GEN_M) >>
+				      TPS_DATA_STATUS_CABLE_GEN_S;
+		tps->cable_info.speed = (data_status & TPS_DATA_STATUS_CABLE_SPEED_M) >>
+					TPS_DATA_STATUS_CABLE_SPEED_S;
+		tps->cable_info.link_training =
+				!!(data_status & TPS_DATA_STATUS_CABLE_LINKTRN);
+		tps->cable_info.is_optical =
+				!!(data_status & TPS_DATA_STATUS_CABLE_OPTICAL);
+		tps->cable_info.is_active =
+				!!(data_status & TPS_DATA_STATUS_CABLE_ACTIVE);
+		tps->cable_info.is_legacy_adapter =
+				!!(data_status & TPS_DATA_STATUS_CABLE_LEGACY);
+	} else if(data_status & TPS_DATA_STATUS_USB3_CONNECTION)
+		data_mode = TYPEC_MODE_USB3;
+	else if(data_status & TPS_DATA_STATUS_USB2_CONNECTION)
+		data_mode = TYPEC_MODE_USB2;
+	else
+		data_mode = 0;
+
 	typec_set_pwr_opmode(tps->port, mode);
-	typec_set_pwr_role(tps->port, TPS_STATUS_TO_TYPEC_PORTROLE(status));
-	typec_set_vconn_role(tps->port, TPS_STATUS_TO_TYPEC_VCONN(status));
-	tps6598x_set_data_role(tps, TPS_STATUS_TO_TYPEC_DATAROLE(status), true);
+	typec_set_pwr_role(tps->port, TPS_STATUS_PORTROLE(status));
+	typec_set_vconn_role(tps->port, TPS_STATUS_VCONN(status));
+	typec_set_orientation(tps->port, TPS_STATUS_ORIENTATION(status) ?
+		TYPEC_ORIENTATION_REVERSE : TYPEC_ORIENTATION_NORMAL);
+	tps6598x_set_data_role(tps, TPS_STATUS_DATAROLE(status), true);
+	if(data_mode == TYPEC_MODE_USB4)
+		typec_set_mode_data(tps->port, data_mode, &tps->cable_info);
+	else
+		typec_set_mode(tps->port, data_mode);
 
 	tps->partner = typec_register_partner(tps->port, &desc);
 	if (IS_ERR(tps->partner))
@@ -266,10 +360,10 @@ static void tps6598x_disconnect(struct tps6598x *tps, u32 status)
 		typec_unregister_partner(tps->partner);
 	tps->partner = NULL;
 	typec_set_pwr_opmode(tps->port, TYPEC_PWR_MODE_USB);
-	typec_set_pwr_role(tps->port, TPS_STATUS_TO_TYPEC_PORTROLE(status));
-	typec_set_vconn_role(tps->port, TPS_STATUS_TO_TYPEC_VCONN(status));
-	tps6598x_set_data_role(tps, TPS_STATUS_TO_TYPEC_DATAROLE(status), false);
-
+	typec_set_pwr_role(tps->port, TPS_STATUS_PORTROLE(status));
+	typec_set_vconn_role(tps->port, TPS_STATUS_VCONN(status));
+	tps6598x_set_data_role(tps, TPS_STATUS_DATAROLE(status), false);
+	typec_set_mode(tps->port, 0);
 	power_supply_changed(tps->psy);
 }
 
@@ -353,7 +447,7 @@ static int tps6598x_dr_set(struct typec_port *port, enum typec_data_role role)
 	if (ret)
 		goto out_unlock;
 
-	if (role != TPS_STATUS_TO_TYPEC_DATAROLE(status)) {
+	if (role != TPS_STATUS_DATAROLE(status)) {
 		ret = -EPROTO;
 		goto out_unlock;
 	}
@@ -383,7 +477,7 @@ static int tps6598x_pr_set(struct typec_port *port, enum typec_role role)
 	if (ret)
 		goto out_unlock;
 
-	if (role != TPS_STATUS_TO_TYPEC_PORTROLE(status)) {
+	if (role != TPS_STATUS_PORTROLE(status)) {
 		ret = -EPROTO;
 		goto out_unlock;
 	}
@@ -419,6 +513,8 @@ static irqreturn_t tps6598x_interrupt(int irq, void *data)
 		goto err_unlock;
 	}
 	trace_tps6598x_irq(event1, event2);
+	if (tps->just_init)
+		goto err_clear_ints;
 
 	ret = tps6598x_read32(tps, TPS_REG_STATUS, &status);
 	if (ret) {
@@ -457,6 +553,12 @@ static irqreturn_t tps6598x_interrupt(int irq, void *data)
 		}
 	}
 
+	if (tps->cd321x_support &&
+	    ((event1 | event2) & (TPS_CD321X_INT_STATUS_CHG | TPS_CD321X_INT_DATA_STATUS_CHG))) {
+		mod_delayed_work(system_wq, &tps->cd321x_status_work,
+				 msecs_to_jiffies(CD321X_SETTLE_MSEC));
+	}
+
 err_clear_ints:
 	tps6598x_write64(tps, TPS_REG_INT_CLEAR1, event1);
 	tps6598x_write64(tps, TPS_REG_INT_CLEAR2, event2);
@@ -464,7 +566,35 @@ err_clear_ints:
 err_unlock:
 	mutex_unlock(&tps->lock);
 
-	return IRQ_HANDLED;
+	return (event1 || event2) ? IRQ_HANDLED : IRQ_NONE;
+}
+
+static void tps6598x_cd321x_status_work(struct work_struct *work)
+{
+	struct tps6598x *tps = container_of(to_delayed_work(work),
+				struct tps6598x, cd321x_status_work);
+	u32 status;
+	int ret;
+
+	mutex_lock(&tps->lock);
+
+	ret = tps6598x_read32(tps, TPS_REG_STATUS, &status);
+	if (ret) {
+		dev_err(tps->dev, "%s: failed to read status\n", __func__);
+		goto err_unlock;
+	}
+
+	if (status & TPS_STATUS_PLUG_PRESENT) {
+		ret = tps6598x_connect(tps, status);
+		if (ret)
+			dev_err(tps->dev,
+				"failed to register partner: %d\n", ret);
+	} else {
+		tps6598x_disconnect(tps, status);
+	}
+
+err_unlock:
+	mutex_unlock(&tps->lock);
 }
 
 static int tps6598x_check_mode(struct tps6598x *tps)
@@ -584,7 +714,10 @@ static int tps6598x_probe(struct i2c_client *client)
 	u32 status;
 	u32 conf;
 	u32 vid;
+	u32 pid;
+	u8 pstate;
 	int ret;
+	unsigned long flags;
 
 	tps = devm_kzalloc(&client->dev, sizeof(*tps), GFP_KERNEL);
 	if (!tps)
@@ -593,16 +726,15 @@ static int tps6598x_probe(struct i2c_client *client)
 	mutex_init(&tps->lock);
 	tps->dev = &client->dev;
 
+	if (device_property_read_bool(&client->dev, "just-init"))
+		tps->just_init = true;
+
 	tps->regmap = devm_regmap_init_i2c(client, &tps6598x_regmap_config);
 	if (IS_ERR(tps->regmap))
 		return PTR_ERR(tps->regmap);
 
-	ret = tps6598x_read32(tps, TPS_REG_VID, &vid);
-	if (ret < 0 || !vid)
-		return -ENODEV;
-
 	/*
-	 * Checking can the adapter handle SMBus protocol. If it can not, the
+	 * Checking can the adapter handle SMBus protocol. If it cannot, the
 	 * driver needs to take care of block reads separately.
 	 *
 	 * FIXME: Testing with I2C_FUNC_I2C. regmap-i2c uses I2C protocol
@@ -611,10 +743,75 @@ static int tps6598x_probe(struct i2c_client *client)
 	if (i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
 		tps->i2c_protocol = true;
 
+	/* Some drivers don't like 65-byte writes, either. */
+	if (device_property_read_bool(&client->dev, "no-long-writes"))
+		tps->i2c_no_long = true;
+
+	if (tps->just_init) {
+		printk("Just performing basic initialization!\n");
+		ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
+					tps6598x_interrupt,
+					IRQF_SHARED | IRQF_ONESHOT,
+					dev_name(&client->dev), tps);
+
+		return ret = 0;
+	}
+	ret = tps6598x_write64(tps, TPS_REG_INT_MASK1, 0);
+	if (ret)
+		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 1);
+
+	ret = tps6598x_write64(tps, TPS_REG_INT_MASK2, 0);
+	if (ret)
+		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 2);
+
+	ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
+					tps6598x_interrupt,
+					IRQF_SHARED | IRQF_ONESHOT,
+					dev_name(&client->dev), tps);
+
+	ret = tps6598x_read32(tps, TPS_REG_VID, &vid);
+	if (ret < 0 || !vid)
+		return -ENODEV;
+
+	ret = tps6598x_read32(tps, TPS_REG_PID, &pid);
+	if (ret < 0)
+		return -ENODEV;
+	tps->product_id = pid;
+
 	/* Make sure the controller has application firmware running */
 	ret = tps6598x_check_mode(tps);
 	if (ret)
 		return ret;
+
+	if(pid == PID_CD3217 || pid == PID_CD3218)
+		tps->cd321x_support = true;
+
+	ret = tps6598x_read8(tps, TPS_REG_POWER_STATE, &pstate);
+	if (ret < 0)
+		return ret;
+
+	ret = tps6598x_write64(tps, TPS_REG_INT_MASK1, 0);
+	if (ret)
+		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 1);
+
+	ret = tps6598x_write64(tps, TPS_REG_INT_MASK2, 0);
+	if (ret)
+		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 2);
+
+	INIT_DELAYED_WORK(&tps->cd321x_status_work, tps6598x_cd321x_status_work);
+
+	local_irq_save(flags);
+	if (pstate == TPS_POWER_STATE_BOOT) {
+		/* on Apple M1, this is how the CD3217/8 comes up; transition to S0 */
+		u8 ssps_data[2] = { TPS_POWER_STATE_S0, 0 };
+
+		ret = tps6598x_exec_cmd(tps, "SSPS", sizeof(ssps_data), ssps_data, 0, NULL);
+		if (ret) {
+			dev_err(&client->dev, "failed to set power state S0\n");
+			return ret;
+		}
+		dev_err(&client->dev, "port is now in power state S0\n");
+	}
 
 	ret = tps6598x_read32(tps, TPS_REG_STATUS, &status);
 	if (ret < 0)
@@ -695,7 +892,6 @@ static int tps6598x_probe(struct i2c_client *client)
 		if (ret)
 			dev_err(&client->dev, "failed to register partner\n");
 	}
-
 	ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
 					tps6598x_interrupt,
 					IRQF_SHARED | IRQF_ONESHOT,
@@ -708,6 +904,11 @@ static int tps6598x_probe(struct i2c_client *client)
 
 	i2c_set_clientdata(client, tps);
 
+	ret = tps6598x_write64(tps, TPS_REG_INT_MASK1, TPS_CD321X_INT_MASK);
+	if (ret)
+		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 1);
+
+	local_irq_restore(flags);
 	return 0;
 
 err_role_put:
