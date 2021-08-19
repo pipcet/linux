@@ -182,18 +182,9 @@ static int cpu_apple_start_boot(unsigned int cpu)
     return 0;
 }
 
-static void cpu_apple_wfi(void)
-{
-    /* can't do a proper WFI, because the CPU tends to lose state; will need
-       a proper wrapper sequence */
-    dsb(sy);
-    wfe();
-}
-
 const struct cpu_operations cpu_apple_start_ops = {
     .name = "apple,startcpu",
     .cpu_init = cpu_apple_start_init,
     .cpu_prepare = cpu_apple_start_prepare,
     .cpu_boot = cpu_apple_start_boot,
-    .cpu_wfi = cpu_apple_wfi,
 };
