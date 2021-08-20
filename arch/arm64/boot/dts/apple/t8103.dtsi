@@ -306,7 +306,7 @@
 		    //clocks = <&spi3_clk>;
                     interrupt-parent = <&aic>;
                     clocks = <&clk24>;
-		    cs-gpios = <&gpio 49 0>;
+		    cs-gpios = <&pinctrl_ap 49 0>;
 		    #address-cells = <1>;
 		    #size-cells = <0>;
 
@@ -314,9 +314,9 @@
 			compatible = "input,applespi-kbd-v1";
 			reg = <0>;
 			spi-max-frequency = <2000000>;
-			spien-gpios = <&gpio 195 0>;
-			irq-gpios = <&nub_gpio 13 0>;
-			interrupt-parent = <&nub_gpio>;
+			spien-gpios = <&pinctrl_ap 195 0>;
+			irq-gpios = <&pinctrl_nub 13 0>;
+			interrupt-parent = <&pinctrl_nub>;
 			interrupts = <13 8>;
 		    };
 		};
@@ -339,7 +339,7 @@
 				     <AIC_IRQ 195 IRQ_TYPE_LEVEL_HIGH>,
 				     <AIC_IRQ 196 IRQ_TYPE_LEVEL_HIGH>;
 
-			clocks = <&pmgr0 APPLE_CLK_GPIO>;
+			clocks = <&clk24>;
 
 			pcie_pins: pcie-pins {
 				pinmux = <APPLE_PINMUX(150, 1)>,
@@ -366,7 +366,7 @@
 				     <AIC_IRQ 335 IRQ_TYPE_LEVEL_HIGH>,
 				     <AIC_IRQ 336 IRQ_TYPE_LEVEL_HIGH>;
 
-			clocks = <&pmgr1 APPLE_CLK_NUB_GPIO>;
+			clocks = <&clk24>;
 		};
 
 		pinctrl_smc: pinctrl@23e820000 {
@@ -708,7 +708,7 @@
 			pci@0,0 {
 				device_type = "pci";
 				reg = <0x0 0x0 0x0 0x0 0x0>;
-				reset-gpios = <&gpio 152 0>;
+				reset-gpios = <&pinctrl_ap 152 0>;
 				max-link-speed = <2>;
 
 				#address-cells = <3>;
@@ -719,7 +719,7 @@
 			pci@1,0 {
 				device_type = "pci";
 				reg = <0x800 0x0 0x0 0x0 0x0>;
-				reset-gpios = <&gpio 153 0>;
+				reset-gpios = <&pinctrl_ap 153 0>;
 				max-link-speed = <2>;
 
 				#address-cells = <3>;
@@ -730,7 +730,7 @@
 			pci@2,0 {
 				device_type = "pci";
 				reg = <0x1000 0x0 0x0 0x0 0x0>;
-				reset-gpios = <&gpio 33 0>;
+				reset-gpios = <&pinctrl_ap 33 0>;
 				max-link-speed = <1>;
 
 				#address-cells = <3>;
