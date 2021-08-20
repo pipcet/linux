@@ -6,10 +6,12 @@
  * mostly only needs MSI handling. Initialization requires enabling power and
  * clocks, along with a number of register pokes.
  *
+ * Copyright (C) 2021 Alyssa Rosenzweig <alyssa@rosenzweig.io>
  * Copyright (C) 2021 Google LLC
  * Copyright (C) 2021 Corellium LLC
  * Copyright (C) 2021 Mark Kettenis <kettenis@openbsd.org>
- * Copyright (C) 2021 Alyssa Rosenzweig <alyssa@rosenzweig.io>
+ *
+ * Author: Alyssa Rosenzweig <alyssa@rosenzweig.io>
  * Author: Marc Zyngier <maz@kernel.org>
  */
 
@@ -32,12 +34,6 @@
 #define   CORE_RC_STAT_READY		BIT(0)
 #define CORE_FABRIC_STAT		0x04000
 #define   CORE_FABRIC_STAT_MASK		0x001F001F
-#define CORE_PHY_CTL			0x80000
-#define   CORE_PHY_CTL_CLK0REQ		BIT(0)
-#define   CORE_PHY_CTL_CLK1REQ		BIT(1)
-#define   CORE_PHY_CTL_CLK0ACK		BIT(2)
-#define   CORE_PHY_CTL_CLK1ACK		BIT(3)
-#define   CORE_PHY_CTL_RESET		BIT(7)
 #define CORE_LANE_CFG(port)		(0x84000 + 0x4000 * (port))
 #define   CORE_LANE_CFG_REFCLK0REQ	BIT(0)
 #define   CORE_LANE_CFG_REFCLK1		BIT(1)
@@ -119,27 +115,19 @@
 /* The doorbell address is "well known" */
 #define DOORBELL_ADDR			0xfffff000
 
-/* The hardware exposes 3 ports. Port 0 (WiFi and Bluetooth) is special, as it
- * is power-gated by SMC to facilitate rfkill.
- */
-enum apple_pcie_port {
-	APPLE_PCIE_PORT_RADIO    = 0,
-	APPLE_PCIE_NUM_PORTS
-};
-
 struct apple_pcie {
-	u32			msi_base;
-	u32			nvecs;
 	struct mutex		lock;
 	struct device		*dev;
+	void __iomem            *rc;
 	struct irq_domain	*domain;
 	unsigned long		*bitmap;
-	void __iomem            *rc;
+	u32			msi_base;
+	u32			nvecs;
 };
 
 static inline void rmwl(u32 clr, u32 set, void __iomem *addr)
 {
-	writel((readl(addr) & ~clr) | set, addr);
+	writel_relaxed((readl_relaxed(addr) & ~clr) | set, addr);
 }
 
 static void apple_msi_top_irq_mask(struct irq_data *d)
@@ -154,24 +142,19 @@ static void apple_msi_top_irq_unmask(struct irq_data *d)
 	irq_chip_unmask_parent(d);
 }
 
-static void apple_msi_top_irq_eoi(struct irq_data *d)
-{
-	irq_chip_eoi_parent(d);
-}
-
 static struct irq_chip apple_msi_top_chip = {
 	.name			= "PCIe MSI",
 	.irq_mask		= apple_msi_top_irq_mask,
 	.irq_unmask		= apple_msi_top_irq_unmask,
-	.irq_eoi		= apple_msi_top_irq_eoi,
+	.irq_eoi		= irq_chip_eoi_parent,
 	.irq_set_affinity	= irq_chip_set_affinity_parent,
 	.irq_set_type		= irq_chip_set_type_parent,
 };
 
 static void apple_msi_compose_msg(struct irq_data *data, struct msi_msg *msg)
 {
-	msg->address_hi = 0;
-	msg->address_lo = DOORBELL_ADDR;
+	msg->address_hi = upper_32_bits(DOORBELL_ADDR);
+	msg->address_lo = lower_32_bits(DOORBELL_ADDR);
 	msg->data = data->hwirq;
 }
 
@@ -179,7 +162,6 @@ static struct irq_chip apple_msi_bottom_chip = {
 	.name			= "MSI",
 	.irq_mask		= irq_chip_mask_parent,
 	.irq_unmask		= irq_chip_unmask_parent,
-	.irq_set_affinity	= irq_chip_set_affinity_parent,
 	.irq_eoi		= irq_chip_eoi_parent,
 	.irq_set_affinity	= irq_chip_set_affinity_parent,
 	.irq_set_type		= irq_chip_set_type_parent,
@@ -254,53 +236,54 @@ static int apple_pcie_setup_refclk(void __iomem *rc,
 	u32 stat;
 	int res;
 
-	res = readl_poll_timeout(rc + CORE_RC_PHYIF_STAT, stat,
-				 stat & CORE_RC_PHYIF_STAT_REFCLK, 100, 50000);
+	res = readl_relaxed_poll_timeout(rc + CORE_RC_PHYIF_STAT, stat,
+					 stat & CORE_RC_PHYIF_STAT_REFCLK,
+					 100, 50000);
 	if (res < 0)
 		return res;
 
 	rmwl(0, CORE_LANE_CTL_CFGACC, rc + CORE_LANE_CTL(idx));
 	rmwl(0, CORE_LANE_CFG_REFCLK0REQ, rc + CORE_LANE_CFG(idx));
 
-	res = readl_poll_timeout(rc + CORE_LANE_CFG(idx), stat,
-				 stat & CORE_LANE_CFG_REFCLK0ACK, 100, 50000);
+	res = readl_relaxed_poll_timeout(rc + CORE_LANE_CFG(idx), stat,
+					 stat & CORE_LANE_CFG_REFCLK0ACK,
+					 100, 50000);
 	if (res < 0)
 		return res;
 
 	rmwl(0, CORE_LANE_CFG_REFCLK1, rc + CORE_LANE_CFG(idx));
-	res = readl_poll_timeout(rc + CORE_LANE_CFG(idx), stat,
-				 stat & CORE_LANE_CFG_REFCLK1, 100, 50000);
+	res = readl_relaxed_poll_timeout(rc + CORE_LANE_CFG(idx), stat,
+					 stat & CORE_LANE_CFG_REFCLK1,
+					 100, 50000);
 
 	if (res < 0)
 		return res;
 
 	rmwl(CORE_LANE_CTL_CFGACC, 0, rc + CORE_LANE_CTL(idx));
-	udelay(1);
-	rmwl(0, CORE_LANE_CFG_REFCLKEN, rc + CORE_LANE_CFG(idx));
 
+	/* Flush writes before enabling the clocks */
+	dma_wmb();
+
+	rmwl(0, CORE_LANE_CFG_REFCLKEN, rc + CORE_LANE_CFG(idx));
 	rmwl(0, PORT_REFCLK_EN, port + PORT_REFCLK);
 
 	return 0;
 }
 
-static int apple_pcie_setup_port(struct apple_pcie *pcie, unsigned int i)
+static int apple_pcie_setup_port(struct apple_pcie *pcie,
+				 struct gpio_desc *reset,
+				 unsigned int i)
 {
-	struct fwnode_handle *fwnode = dev_fwnode(pcie->dev);
+	struct platform_device *platform = to_platform_device(pcie->dev);
 	void __iomem *port;
-	struct gpio_desc *reset;
 	uint32_t stat;
 	int ret;
 
-	port = devm_of_iomap(pcie->dev, to_of_node(fwnode), i + 3, NULL);
+	port = devm_platform_ioremap_resource(platform, i + 2);
 
 	if (IS_ERR(port))
 		return -ENODEV;
 
-	reset = devm_gpiod_get_index(pcie->dev, "reset", i, 0);
-	if (IS_ERR(reset))
-		return PTR_ERR(reset);
-
-	gpiod_direction_output(reset, 0);
 
 	rmwl(0, PORT_APPCLK_EN, port + PORT_APPCLK);
 
@@ -311,45 +294,33 @@ static int apple_pcie_setup_port(struct apple_pcie *pcie, unsigned int i)
 	rmwl(0, PORT_PERST_OFF, port + PORT_PERST);
 	gpiod_set_value(reset, 1);
 
-	ret = readl_poll_timeout(port + PORT_STATUS, stat,
-				 stat & PORT_STATUS_READY, 100, 250000);
+	ret = readl_relaxed_poll_timeout(port + PORT_STATUS, stat,
+					 stat & PORT_STATUS_READY, 100, 250000);
 	if (ret < 0) {
 		dev_err(pcie->dev, "port %u ready wait timeout\n", i);
 		return ret;
 	}
 
-	rmwl(PORT_REFCLK_CGDIS, 0, port + PORT_REFCLK);
-	rmwl(PORT_APPCLK_CGDIS, 0, port + PORT_APPCLK);
+	/* Configure MSIs */
+	writel_relaxed(DOORBELL_ADDR, port + PORT_MSIADDR);
+	writel_relaxed(0, port + PORT_MSIBASE);
 
-	ret = readl_poll_timeout(port + PORT_LINKSTS, stat,
-				 !(stat & PORT_LINKSTS_BUSY), 100, 250000);
-	if (ret < 0) {
-		dev_err(pcie->dev, "port %u link not busy timeout\n", i);
-		return ret;
-	}
+	/* Enable 32 MSIs */
+	writel_relaxed((5 << PORT_MSICFG_L2MSINUM_SHIFT) | PORT_MSICFG_EN,
+		       port + PORT_MSICFG);
 
-	writel(0xfb512fff, port + PORT_INTMSKSET);
+	/* Enable link interrupts */
+	writel_relaxed(0xfb512fff, port + PORT_INTMSKSET);
 
-	writel(PORT_INT_LINK_UP | PORT_INT_LINK_DOWN | PORT_INT_AF_TIMEOUT |
-	       PORT_INT_REQADDR_GT32 | PORT_INT_MSI_ERR |
-	       PORT_INT_MSI_BAD_DATA | PORT_INT_CPL_ABORT |
-	       PORT_INT_CPL_TIMEOUT | (1 << 26), port + PORT_INTSTAT);
+	writel_relaxed(PORT_INT_LINK_UP | PORT_INT_LINK_DOWN |
+		       PORT_INT_AF_TIMEOUT | PORT_INT_REQADDR_GT32 |
+		       PORT_INT_MSI_ERR | PORT_INT_MSI_BAD_DATA |
+		       PORT_INT_CPL_ABORT | PORT_INT_CPL_TIMEOUT | (1 << 26),
+		       port + PORT_INTSTAT);
 
-	usleep_range(5000, 10000);
-
-	rmwl(0, PORT_LTSSMCTL_START, port + PORT_LTSSMCTL);
-
-	ret = readl_poll_timeout(port + PORT_LINKSTS, stat,
-				 stat & PORT_LINKSTS_UP, 100, 500000);
-	if (ret < 0) {
-		dev_err(pcie->dev, "port %u link up wait timeout\n", i);
-		return ret;
-	}
-
-	writel(DOORBELL_ADDR, port + PORT_MSIADDR);
-	writel(0, port + PORT_MSIBASE);
-	writel((5 << PORT_MSICFG_L2MSINUM_SHIFT) | PORT_MSICFG_EN,
-	       port + PORT_MSICFG);
+	/* Flush writes and enable the link */
+	dma_wmb();
+	writel_relaxed(PORT_LTSSMCTL_START, port + PORT_LTSSMCTL);
 
 	return 0;
 }
@@ -359,34 +330,19 @@ static int apple_msi_init(struct apple_pcie *pcie)
 	struct fwnode_handle *fwnode = dev_fwnode(pcie->dev);
 	struct device_node *parent_intc;
 	struct irq_domain *parent;
-	int ret, i;
+	int ret;
 
-	pcie->rc = devm_of_iomap(pcie->dev, to_of_node(fwnode), 1, NULL);
-
-	if (IS_ERR(pcie->rc))
-		return -ENODEV;
-
-	for (i = 0; i < APPLE_PCIE_NUM_PORTS; ++i) {
-		ret = apple_pcie_setup_port(pcie, i);
-
-		if (ret) {
-			dev_err(pcie->dev, "Port %u setup fail: %d\n", i, ret);
-			return ret;
-		}
-	}
-
-	ret = of_property_read_u32_index(to_of_node(fwnode), "msi-interrupts",
+	ret = of_property_read_u32_index(to_of_node(fwnode), "msi-ranges",
 					 0, &pcie->msi_base);
 	if (ret)
 		return ret;
 
-	ret = of_property_read_u32_index(to_of_node(fwnode), "msi-interrupts",
+	ret = of_property_read_u32_index(to_of_node(fwnode), "msi-ranges",
 					 1, &pcie->nvecs);
 	if (ret)
 		return ret;
 
-	pcie->bitmap = devm_kcalloc(pcie->dev, BITS_TO_LONGS(pcie->nvecs),
-				    sizeof(long), GFP_KERNEL);
+	pcie->bitmap = devm_bitmap_zalloc(pcie->dev, pcie->nvecs, GFP_KERNEL);
 	if (!pcie->bitmap)
 		return -ENOMEM;
 
@@ -419,7 +375,15 @@ static int apple_msi_init(struct apple_pcie *pcie)
 static int apple_m1_pci_init(struct pci_config_window *cfg)
 {
 	struct device *dev = cfg->parent;
+	struct platform_device *platform = to_platform_device(dev);
+
 	struct apple_pcie *pcie;
+	struct device_node *of_port;
+	int ret, i;
+	static int count = 0;
+
+	if (count++ < 10)
+		return -ENODEV;
 
 	pcie = devm_kzalloc(dev, sizeof(*pcie), GFP_KERNEL);
 	if (!pcie)
@@ -428,6 +392,32 @@ static int apple_m1_pci_init(struct pci_config_window *cfg)
 	pcie->dev = dev;
 
 	mutex_init(&pcie->lock);
+
+	pcie->rc = devm_platform_ioremap_resource(platform, 1);
+
+	if (IS_ERR(pcie->rc))
+		return -ENODEV;
+
+	i = 0;
+
+	for_each_child_of_node(dev->of_node, of_port) {
+		struct gpio_desc *reset;
+
+		reset = gpiod_get_from_of_node(of_port, "reset-gpios", 0,
+					       GPIOD_OUT_LOW, "#PERST");
+		if (IS_ERR(reset))
+			return PTR_ERR(reset);
+
+		ret = apple_pcie_setup_port(pcie, reset, i);
+
+		gpiod_put(reset);
+		if (ret) {
+			dev_err(pcie->dev, "Port %u setup fail: %d\n", i, ret);
+			return ret;
+		}
+
+		++i;
+	}
 
 	return apple_msi_init(pcie);
 }
@@ -443,9 +433,9 @@ static const struct pci_ecam_ops apple_m1_cfg_ecam_ops = {
 
 static const struct of_device_id apple_pci_of_match[] = {
 	{ .compatible = "apple,pcie", .data = &apple_m1_cfg_ecam_ops },
-	{ },
+	{ }
 };
-MODULE_DEVICE_TABLE(of, gen_pci_of_match);
+MODULE_DEVICE_TABLE(of, apple_pci_of_match);
 
 static struct platform_driver apple_pci_driver = {
 	.driver = {
