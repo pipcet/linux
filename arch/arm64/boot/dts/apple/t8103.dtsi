@@ -721,4 +721,8 @@
 		width = <0>;
 		status = "okay";
 	};
+
+	chosen {
+	        bootargs = "";
+	};
 };
