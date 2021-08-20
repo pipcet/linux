@@ -18,6 +18,14 @@ config APPLE_MAILBOX
 
 	  Say Y here if you have such a system.
 
+config KVBOX
+        bool "Key-Value Hardware Support"
+	help
+          Key-Value boxes are a variant of mailbox with many
+	  individual properties, rather than a few independent channels.
+
+	  Say Y if your platform has one of these.
+
 config ARM_MHU
 	tristate "ARM MHU Mailbox"
 	depends on ARM_AMBA
