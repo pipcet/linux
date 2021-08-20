@@ -23,13 +23,13 @@
 	interrupt-parent = <&aic>;
 
 	cpus {
-		#address-cells = <2>;
+		#address-cells = <1>;
 		#size-cells = <0>;
 
 		cpu0: cpu@0 {
 			compatible = "apple,icestorm";
 			device_type = "cpu";
-			reg = <0x0 0x0>;
+			reg = <0x0>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
@@ -38,7 +38,7 @@
 		cpu1: cpu@1 {
 			compatible = "apple,icestorm";
 			device_type = "cpu";
-			reg = <0x0 0x1>;
+			reg = <0x1>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
@@ -47,7 +47,7 @@
 		cpu2: cpu@2 {
 			compatible = "apple,icestorm";
 			device_type = "cpu";
-			reg = <0x0 0x2>;
+			reg = <0x2>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
@@ -56,7 +56,7 @@
 		cpu3: cpu@3 {
 			compatible = "apple,icestorm";
 			device_type = "cpu";
-			reg = <0x0 0x3>;
+			reg = <0x3>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
@@ -65,7 +65,7 @@
 		cpu4: cpu@10100 {
 			compatible = "apple,firestorm";
 			device_type = "cpu";
-			reg = <0x0 0x10100>;
+			reg = <0x10100>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
@@ -74,7 +74,7 @@
 		cpu5: cpu@10101 {
 			compatible = "apple,firestorm";
 			device_type = "cpu";
-			reg = <0x0 0x10101>;
+			reg = <0x10101>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
@@ -83,7 +83,7 @@
 		cpu6: cpu@10102 {
 			compatible = "apple,firestorm";
 			device_type = "cpu";
-			reg = <0x0 0x10102>;
+			reg = <0x10102>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
@@ -92,7 +92,7 @@
 		cpu7: cpu@10103 {
 			compatible = "apple,firestorm";
 			device_type = "cpu";
-			reg = <0x0 0x10103>;
+			reg = <0x10103>;
 			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
@@ -131,6 +131,18 @@
 		ranges;
 		dma-ranges;
 		nonposted-mmio;
+
+		applestart: applestart@23b754004 {
+			compatible = "apple,startcpu";
+			reg = <0x2 0x3b754004 0x0 0xc   0x2 0x10050000 0x0 0x8   0x2 0x10030fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x10150000 0x0 0x8   0x2 0x10130fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x10250000 0x0 0x8   0x2 0x10230fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x10350000 0x0 0x8   0x2 0x10330fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x11050000 0x0 0x8   0x2 0x11030fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x11150000 0x0 0x8   0x2 0x11130fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x11250000 0x0 0x8   0x2 0x11230fb0 0x0 0x4
+				0x2 0x3b754004 0x0 0xc   0x2 0x11350000 0x0 0x8   0x2 0x11330fb0 0x0 0x4>;
+		};
 
 		cpufreq: cpufreq@210e00000 {
 			compatible = "apple,pmgr-cpufreq-m1";
