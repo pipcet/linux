@@ -104,8 +104,8 @@ static void apple_ioreport_allocator_func(struct work_struct *work)
 
 static void apple_ioreport_ioreport_func(struct work_struct *work)
 {
-	struct apple_ioreport *ioreport = container_of(work, struct apple_ioreport,
-						 work);
+	struct apple_ioreport *ioreport =
+		container_of(work, struct apple_ioreport, work);
 	static char pbuf[2048];
 	int i;
 	for (i = 0; i < 2048; i++) {
