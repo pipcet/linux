@@ -30,7 +30,7 @@
 			compatible = "apple,icestorm";
 			device_type = "cpu";
 			reg = <0x0 0x0>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
 		};
@@ -39,7 +39,7 @@
 			compatible = "apple,icestorm";
 			device_type = "cpu";
 			reg = <0x0 0x1>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
 		};
@@ -48,7 +48,7 @@
 			compatible = "apple,icestorm";
 			device_type = "cpu";
 			reg = <0x0 0x2>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
 		};
@@ -57,7 +57,7 @@
 			compatible = "apple,icestorm";
 			device_type = "cpu";
 			reg = <0x0 0x3>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <0>;
 		};
@@ -66,7 +66,7 @@
 			compatible = "apple,firestorm";
 			device_type = "cpu";
 			reg = <0x0 0x10100>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
 		};
@@ -75,7 +75,7 @@
 			compatible = "apple,firestorm";
 			device_type = "cpu";
 			reg = <0x0 0x10101>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
 		};
@@ -84,7 +84,7 @@
 			compatible = "apple,firestorm";
 			device_type = "cpu";
 			reg = <0x0 0x10102>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
 		};
@@ -93,7 +93,7 @@
 			compatible = "apple,firestorm";
 			device_type = "cpu";
 			reg = <0x0 0x10103>;
-			enable-method = "spin-table";
+			enable-method = "apple,startcpu";
 			cpu-release-addr = <0 0>; /* To be filled by loader */
 			apple,cluster = <1>;
 		};
@@ -180,13 +180,22 @@
 			#iommu-cells = <1>;
 		};
 
-		dwc3_0: usb@382280000{
-			compatible = "snps,dwc3";
-			reg = <0x3 0x82280000 0x0 0x100000>;
-			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 777 IRQ_TYPE_LEVEL_HIGH>;
-			dr_mode = "host";
-			iommus = <&dwc3_0_dart_0 0>, <&dwc3_0_dart_1 1>;
+		dwc3_0: usb@382280000 {
+			compatible = "apple,dwc3-m1";
+			reg = <0x3 0x80000000 0x0 0x100000 0x3 0x82000000 0x0 0x1000000>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+			nonposted-mmio;
+
+			dwc3_0_real: dwc3@382280000 {
+				compatible = "snps,dwc3";
+				reg = <0x3 0x82280000 0x0 0x100000>;
+				interrupt-parent = <&aic>;
+				interrupts = <AIC_IRQ 777 IRQ_TYPE_LEVEL_HIGH>;
+				dr_mode = "host";
+				iommus = <&dwc3_0_dart_0 0>, <&dwc3_0_dart_1 1>;
+			};
 		};
 
 		dwc3_1_dart_0: iommu@502f00000 {
@@ -206,12 +215,21 @@
 		};
 
 		dwc3_1: usb@502280000{
-			compatible = "snps,dwc3";
-			reg = <0x5 0x02280000 0x0 0x100000>;
-			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 857 IRQ_TYPE_LEVEL_HIGH>;
-			dr_mode = "host";
-			iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
+			compatible = "apple,dwc3-m1";
+			reg = <0x5 0x00000000 0x0 0x100000 0x5 0x02000000 0x0 0x1000000>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ranges;
+			nonposted-mmio;
+
+			dwc3_1_real: dwc3@502280000 {
+				compatible = "snps,dwc3";
+				reg = <0x5 0x02280000 0x0 0x100000>;
+				interrupt-parent = <&aic>;
+				interrupts = <AIC_IRQ 857 IRQ_TYPE_LEVEL_HIGH>;
+				dr_mode = "host";
+				iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
+			};
 		};
 
 		gpio_clk: gpio_clk@23b700130 {
@@ -678,5 +696,17 @@
 		max-brightness = <0x20d0000>;
 		mboxes = <&dcp_asc_dcp 0>;
 		power-gpios = <&smc_gpio 1 0>;
+	};
+
+	framebuffer@9e0df8000 {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		compatible = "simple-framebuffer";
+		reg = <0 0 0 0>;
+		format = "x8r8g8b8";
+		height = <0>;
+		stride = <0>;
+		width = <0>;
+		status = "okay";
 	};
 };
