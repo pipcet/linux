@@ -171,7 +171,7 @@
 			 * TODO: figure out the clocking properly, there may
 			 * be a third selectable clock.
 			 */
-			clocks = <&pmgr0 APPLE_CLK_UART0>, <&clk24>;
+			clocks = <&clk24>, <&clk24>;
 			clock-names = "uart", "clk_uart_baud0";
 			status = "disabled";
 		};
