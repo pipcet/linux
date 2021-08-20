@@ -1,9 +1,15 @@
 #include <linux/apple-asc.h>
 #include <linux/input.h>
+#include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/printk.h>
 #include <linux/kvbox.h>
+#include <linux/sched/debug.h>
+
+#include <asm/ptrace.h>
+#include <asm/irq_regs.h>
 
 #define ASC_POWER_DOWN		0x7201060100000018
 #define ASC_POWER_UP		0x7201060000000018
@@ -61,6 +67,7 @@ static void hid_receive_data(struct mbox_client *cl, void *ptr)
 	case ASC_POWER_DOWN_2:
 	case ASC_POWER_UP:
 	case ASC_POWER_UP_2:
+		show_regs(get_irq_regs());
 		update_power_button(hid);
 		break;
 	case ASC_LID_CLOSE:
