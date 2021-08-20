@@ -89,6 +89,8 @@ extern int apple_dcp_transaction(struct mbox_chan *,
 static inline int mbox_copy_and_send(struct mbox_chan *chan, void *ptr)
 {
 	struct apple_mbox_msg *msg = kzalloc(sizeof(*msg), GFP_KERNEL);
+	if (!msg)
+		return -ENOMEM;
 	memcpy(msg, ptr, sizeof(*msg));
 	return mbox_send_message(chan, msg);
 }
