@@ -10,17 +10,10 @@
 #include <dt-bindings/soc/ascii.h>
 #include <dt-bindings/interrupt-controller/apple-aic.h>
 #include <dt-bindings/interrupt-controller/irq.h>
-#include <dt-bindings/pinctrl/apple.h>
 
-#define APPLE_CLK_GPIO     0x130
-#define APPLE_CLK_SIOBUSIF 0x1c0
-#define APPLE_CLK_SIO      0x1c8
-#define APPLE_CLK_SPI_P    0x218
-#define APPLE_CLK_UART_P   0x220
-#define APPLE_CLK_SPI3     0x258
-#define APPLE_CLK_UART0    0x270
-
-#define APPLE_CLK_NUB_GPIO 0x80
+#define APPLE_PINMUX(pin, func) ((pin) | ((func) << 16))
+#define APPLE_PIN(pinmux) ((pinmux) & 0xffff)
+#define APPLE_FUNC(pinmux) ((pinmux) >> 16)
 
 / {
 	compatible = "apple,t8103", "apple,arm-platform";
@@ -251,46 +244,35 @@
 			};
 		};
 
-		spi3: spi@23510c000 {
-			compatible = "apple,spi-mc-m1";
-			reg = <0x2 0x3510c000 0x0 0x4000>;
-			interrupts = <0 617 4>;
-                	interrupt-parent = <&aic>;
-                	clocks = <&clk24>;
-			cs-gpios = <&pinctrl_ap 49 0>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			keyboard@0 {
-				compatible = "input,applespi-kbd-v1";
-				reg = <0>;
-				spi-max-frequency = <2000000>;
-				spien-gpios = <&pinctrl_ap 195 0>;
-				irq-gpios = <&pinctrl_nub 13 0>;
-				interrupt-parent = <&pinctrl_nub>;
-				interrupts = <13 8>;
-			};
+		gpio_clk: gpio_clk@23b700130 {
+		    compatible = "apple,pmgr-clk-gate";
+		    #clock-cells = <0>;
+		    reg = <0x2 0x3b700130 0x0 0x8>;
+		    clocks = <&clk24>;
+		    clock-output-names = "gpio_clk";
 		};
 
 		pinctrl_ap: pinctrl@23c100000 {
 			compatible = "apple,t8103-pinctrl", "apple,pinctrl";
 			reg = <0x2 0x3c100000 0x0 0x100000>;
+		    pin-count = <212>;
 
-			gpio-controller;
-			#gpio-cells = <2>;
-			gpio-ranges = <&pinctrl_ap 0 0 212>;
+		    interrupts = <0 190 4   0 191 4   0 192 4   0 193 4   0 194 4   0 195 4   0 196 4>;
 
-			interrupt-controller;
-			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 190 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 191 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 192 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 193 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 194 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 195 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 196 IRQ_TYPE_LEVEL_HIGH>;
+		    clocks = <&gpio_clk>;
 
-			clocks = <&clk24>;
+		    gpio-controller;
+		    #gpio-cells = <2>;
+		    gpio-ranges = <&pinctrl_ap 0 0 212>;
+
+                    interrupt-parent = <&aic>;
+		    interrupt-controller;
+		    #interrupt-cells = <2>;
+
+		    i2c0_pins: i2c0_pins {
+			pins = "gpio192", "gpio188";
+			function = "periph";
+		    };
 
 			pcie_pins: pcie-pins {
 				pinmux = <APPLE_PINMUX(150, 1)>,
@@ -299,63 +281,89 @@
 			};
 		};
 
-		pinctrl_nub: pinctrl@23d1f0000 {
-			compatible = "apple,t8103-pinctrl", "apple,pinctrl";
-			reg = <0x2 0x3d1f0000 0x0 0x4000>;
+		nub_gpio_clk: nub_gpio_clk@23d280080 {
+		    compatible = "apple,pmgr-clk-gate";
+		    #clock-cells = <0>;
+		    reg = <0x2 0x3d280080 0x0 0x8>;
+		    clocks = <&clk24>;
+		    clock-output-names = "nub_gpio_clk";
+		};
 
-			gpio-controller;
-			#gpio-cells = <2>;
-			gpio-ranges = <&pinctrl_nub 0 212 23>;
-
-			interrupt-controller;
-			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 330 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 331 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 332 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 333 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 334 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 335 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 336 IRQ_TYPE_LEVEL_HIGH>;
-
+		sio_busif_clk: sio_busif_clk@23b7001c0 {
+			compatible = "apple,pmgr-clk-gate";
+			#clock-cells = <0>;
+			reg = <0x2 0x3b7001c0 0x0 0x8>;
 			clocks = <&clk24>;
+			clock-output-names = "sio_busif_clk";
 		};
 
-		pinctrl_smc: pinctrl@23e820000 {
-			compatible = "apple,t8103-pinctrl", "apple,pinctrl";
-			reg = <0x2 0x3e820000 0x0 0x4000>;
-
-			gpio-controller;
-			#gpio-cells = <2>;
-			gpio-ranges = <&pinctrl_smc 0 0 16>;
-
-			interrupt-controller;
-			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 391 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 392 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 393 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 394 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 395 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 396 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 397 IRQ_TYPE_LEVEL_HIGH>;
+		sio_clk: sio_clk@23b7001c8 {
+			compatible = "apple,pmgr-clk-gate";
+			#clock-cells = <0>;
+			reg = <0x2 0x3b7001c8 0x0 0x8>;
+			clocks = <&sio_busif_clk>;
+			clock-output-names = "sio_clk";
 		};
 
-		pinctrl_aop: pinctrl@24a820000 {
-			compatible = "apple,t8103-pinctrl", "apple,pinctrl";
-			reg = <0x2 0x4a820000 0x0 0x4000>;
+		nub_gpio: pinctrl@23d1f0000 {
+		    compatible = "apple,t8103-pinctrl", "apple,pinctrl";
+		    reg = <0x2 0x3d1f0000 0x0 0x4000>;
 
-			gpio-controller;
-			#gpio-cells = <2>;
-			gpio-ranges = <&pinctrl_aop 0 0 42>;
+			interrupts = <AIC_IRQ 330 IRQ_TYPE_LEVEL_HIGH
+			              AIC_IRQ 331 IRQ_TYPE_LEVEL_HIGH
+			              AIC_IRQ 332 IRQ_TYPE_LEVEL_HIGH
+			              AIC_IRQ 333 IRQ_TYPE_LEVEL_HIGH
+			              AIC_IRQ 334 IRQ_TYPE_LEVEL_HIGH
+			              AIC_IRQ 335 IRQ_TYPE_LEVEL_HIGH
+			              AIC_IRQ 336 IRQ_TYPE_LEVEL_HIGH>;
 
-			interrupt-controller;
-			interrupt-parent = <&aic>;
-			interrupts = <AIC_IRQ 268 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 269 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 270 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 271 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 272 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 273 IRQ_TYPE_LEVEL_HIGH>,
-				     <AIC_IRQ 274 IRQ_TYPE_LEVEL_HIGH>;
+		    clocks = <&nub_gpio_clk>;
+
+		    gpio-controller;
+		    #gpio-cells = <2>;
+		    gpio-ranges = <&nub_gpio 0 221 23>;
+
+                    interrupt-parent = <&aic>;
+		    interrupt-controller;
+		    #interrupt-cells = <2>;
+		};
+
+		spi_p_clk: spi_p_clk@23b700218 {
+		    compatible = "apple,pmgr-clk-gate";
+		    #clock-cells = <0>;
+		    reg = <0x2 0x3b700218 0x0 0x8>;
+		    clocks = <&sio_clk>;
+		    clock-output-names = "spi_p_clk";
+		};
+
+		spi3_clk: spi3_clk@23b700258 {
+		    compatible = "apple,pmgr-clk-gate";
+		    #clock-cells = <0>;
+		    reg = <0x2 0x3b700258 0x0 0x8>;
+		    clocks = <&spi_p_clk>;
+		    clock-output-names = "spi3_clk";
+		};
+
+		spi3: spi@23510c000 {
+		    compatible = "apple,spi-mc-m1";
+		    reg = <0x2 0x3510c000 0x0 0x4000>;
+		    interrupts = <0 617 4>;
+		    //clocks = <&spi3_clk>;
+                    interrupt-parent = <&aic>;
+                    clocks = <&clk24>;
+		    cs-gpios = <&pinctrl_ap 49 0>;
+		    #address-cells = <1>;
+		    #size-cells = <0>;
+
+		    keyboard@0 {
+			compatible = "input,applespi-kbd-v1";
+			reg = <0>;
+			spi-max-frequency = <2000000>;
+			spien-gpios = <&pinctrl_ap 195 0>;
+			irq-gpios = <&nub_gpio 13 0>;
+			interrupt-parent = <&nub_gpio>;
+			interrupts = <13 8>;
+		    };
 		};
 
 		pcie0_dart_0: dart@681008000 {
@@ -656,6 +664,10 @@
 			pinctrl-0 = <&pcie_pins>;
 			pinctrl-names = "default";
 
+			reset-gpios = <&pinctrl_ap 152 0
+				       &pinctrl_ap 153 0
+				       &pinctrl_ap 33 0>;
+
 			pci@0,0 {
 				device_type = "pci";
 				reg = <0x0 0x0 0x0 0x0 0x0>;
@@ -739,5 +751,6 @@
 
 	chosen {
 	        bootargs = "";
+		framebuffer { };
 	};
 };
