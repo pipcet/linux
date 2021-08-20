@@ -567,27 +567,27 @@
 			endpoints = <0>;
 			#address-cells = <2>;
 			#size-cells = <2>;
-			ans_asc_mgmt: ans_asc_mgmt@0 {
+			ans_asc_mgmt: ans_asc_mgmt {
 				compatible = "apple,apple-asc-mgmt", "apple,apple-asc-system-endpoint";
 				mboxes = <&ans_asc 0x0>;
 				rprocs = <&ans_asc>;
 			};
-			ans_asc_panic: ans_asc_panic@1 {
+			ans_asc_panic: ans_asc_panic {
 				compatible = "apple,apple-asc-panic", "apple,apple-asc-system-endpoint";
 				mboxes = <&ans_asc 0x1>;
 				rprocs = <&ans_asc>;
 			};
-			ans_asc_syslog: ans_asc_syslog@2 {
+			ans_asc_syslog: ans_asc_syslog {
 				compatible = "apple,apple-asc-iorpt", "apple,apple-asc-system-endpoint";
 				mboxes = <&ans_asc 0x2>;
 				rprocs = <&ans_asc>;
 			};
-			ans_asc_ioreport: ans_asc_ioreport@4 {
+			ans_asc_ioreport: ans_asc_ioreport {
 				compatible = "apple,apple-asc-iorpt", "apple,apple-asc-system-endpoint";
 				mboxes = <&ans_asc 0x4>;
 				rprocs = <&ans_asc>;
 			};
-			ans_asc_ans: ans_asc_ans@4 {
+			ans_asc_ans: ans_asc_ans {
 				compatible = "apple,apple-asc-ans", "apple,apple-asc-system-endpoint";
 				mboxes = <&ans_asc 0x20>;
 				#mbox-cells = <1>;
