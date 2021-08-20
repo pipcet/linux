@@ -512,4 +512,4 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	return 0;
 }
 
-IRQCHIP_DECLARE(apple_m1_aic, "apple,aic", aic_of_ic_init);
+IRQCHIP_DECLARE(apple_m1_aic, "apple,t8103-aic", aic_of_ic_init);
