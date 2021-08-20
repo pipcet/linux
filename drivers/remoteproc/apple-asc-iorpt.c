@@ -47,8 +47,16 @@ static void apple_ioreport_allocator_func(struct work_struct *work)
 	struct apple_ioreport *ioreport =
 		container_of(work, struct apple_ioreport, work);
 	struct apple_mbox_msg response;
-	struct mbox_chan *chan;
 	struct apple_queued_msg *qm;
+
+	/* This fun race condition is because a client's rx_callback
+	 * is sometimes called before mbox_request_chan returns. */
+	if (!ioreport->chan) {
+		dev_err(ioreport->dev, "allocator_func called too early!\n");
+		schedule_work(work);
+		return;
+	}
+
 	while (!list_empty(&ioreport->queued_messages)) {
 		qm = list_first_entry(&ioreport->queued_messages,
 				      struct apple_queued_msg, list);
@@ -154,7 +162,7 @@ static int apple_ioreport_probe(struct platform_device *pdev)
 	ioreport->chan = mbox_request_channel(&ioreport->cl, 0);
 
 	if (IS_ERR(ioreport->chan)) {
-		dev_err(ioreport->dev, "couldn't acquire mailbox channel");
+		dev_err(ioreport->dev, "couldn't acquire mailbox channel\n");
 		return PTR_ERR(ioreport->chan);
 	}
 	init_completion(&ioreport->tx_complete);
