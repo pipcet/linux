@@ -65,7 +65,7 @@ static void apple_mailbox_send_cpu_to_iop(struct apple_mailbox *mb,
 {
 	u64 msg_data[2];
 	memcpy(msg_data, msg, sizeof(msg_data));
-	if (1) dev_err(mb->mbox_controller.dev,
+	if (0) dev_err(mb->mbox_controller.dev,
 				   "> %016llx %016llx [%016llx]\n",
 				   msg_data[0], msg_data[1], (u64)mb);
 	writeq(msg_data[0], mb->reg + REG_SEND_CPU_TO_IOP);
@@ -134,7 +134,7 @@ static irqreturn_t apple_mailbox_irq_iop_to_cpu_nonempty(int irq, void *ptr)
 
 	msg_data[0] = readq(mb->reg + REG_RECV_IOP_TO_CPU);
 	msg_data[1] = readq(mb->reg + REG_RECV_IOP_TO_CPU + 8);
-	if (1) dev_err(mb->mbox_controller.dev,
+	if (0) dev_err(mb->mbox_controller.dev,
 				   "< %016llx %016llx [%016llx]\n",
 				   msg_data[0], msg_data[1], (u64)mb);
 
