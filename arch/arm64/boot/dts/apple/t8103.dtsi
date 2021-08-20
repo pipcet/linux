@@ -10,10 +10,17 @@
 #include <dt-bindings/soc/ascii.h>
 #include <dt-bindings/interrupt-controller/apple-aic.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/apple.h>
 
-#define APPLE_PINMUX(pin, func) ((pin) | ((func) << 16))
-#define APPLE_PIN(pinmux) ((pinmux) & 0xffff)
-#define APPLE_FUNC(pinmux) ((pinmux) >> 16)
+#define APPLE_CLK_GPIO     0x130
+#define APPLE_CLK_SIOBUSIF 0x1c0
+#define APPLE_CLK_SIO      0x1c8
+#define APPLE_CLK_SPI_P    0x218
+#define APPLE_CLK_UART_P   0x220
+#define APPLE_CLK_SPI3     0x258
+#define APPLE_CLK_UART0    0x270
+
+#define APPLE_CLK_NUB_GPIO 0x80
 
 / {
 	compatible = "apple,t8103", "apple,arm-platform";
@@ -164,7 +171,7 @@
 			 * TODO: figure out the clocking properly, there may
 			 * be a third selectable clock.
 			 */
-			clocks = <&clk24>, <&clk24>;
+			clocks = <&pmgr0 APPLE_CLK_UART0>, <&clk24>;
 			clock-names = "uart", "clk_uart_baud0";
 			status = "disabled";
 		};
