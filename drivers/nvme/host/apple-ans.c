@@ -270,7 +270,7 @@ static int apple_nvme_init_request(struct blk_mq_tag_set *set, struct request *r
 static void apple_nvme_submit_cmd(struct apple_nvme_queue *nvmeq, struct nvme_command *cmd,
 			    bool write_sq)
 {
-	u32 tag = cmd->common.command_id;
+	u32 tag = nvme_tag_from_cid(cmd->common.command_id);
 	struct apple_nvmmu_tcb *tcb;
 
 	tcb = nvmeq->ans2_tcb_ptr + tag * sizeof(struct apple_nvmmu_tcb);
