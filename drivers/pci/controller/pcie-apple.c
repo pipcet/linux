@@ -272,18 +272,12 @@ static int apple_pcie_setup_refclk(void __iomem *rc,
 
 static int apple_pcie_setup_port(struct apple_pcie *pcie,
 				 struct gpio_desc *reset,
-				 unsigned int i)
+				 unsigned int i,
+				 void __iomem *port)
 {
 	struct platform_device *platform = to_platform_device(pcie->dev);
-	void __iomem *port;
 	uint32_t stat;
 	int ret;
-
-	port = devm_platform_ioremap_resource(platform, i + 2);
-
-	if (IS_ERR(port))
-		return -ENODEV;
-
 
 	rmwl(0, PORT_APPCLK_EN, port + PORT_APPCLK);
 
@@ -372,6 +366,92 @@ static int apple_msi_init(struct apple_pcie *pcie)
 	return 0;
 }
 
+#define set32(addr, value) rmwl(0, value, addr)
+#define clear32(addr, value) rmwl(value, 0, addr)
+#define poll32(addr, mask, value, timeout) \
+	readl_relaxed_poll_timeout(addr, stat, \
+				   (stat & (mask)) == (value), 100, 250000)
+
+/* PHY registers */
+
+#define APCIE_PHY_CTRL         0x000
+#define APCIE_PHY_CTRL_CLK0REQ BIT(0)
+#define APCIE_PHY_CTRL_CLK1REQ BIT(1)
+#define APCIE_PHY_CTRL_CLK0ACK BIT(2)
+#define APCIE_PHY_CTRL_CLK1ACK BIT(3)
+#define APCIE_PHY_CTRL_RESET   BIT(7)
+
+/* Port registers */
+
+#define APCIE_PORT_APPCLK    0x800
+#define APCIE_PORT_APPCLK_EN BIT(0)
+
+#define APCIE_PORT_STATUS     0x804
+#define APCIE_PORT_STATUS_RUN BIT(0)
+
+#define APCIE_PORT_RESET     0x814
+#define APCIE_PORT_RESET_DIS BIT(0)
+
+/* DesignWare PCIe Core registers */
+
+#define DWC_DBI_RO_WR    0x8bc
+#define DWC_DBI_RO_WR_EN BIT(0)
+
+static int apple_m1_pci_preinit(void __iomem *phy_base,
+				void __iomem *rc_base,
+				void __iomem *config_base,
+				void __iomem *port_base[3])
+{
+	u32 stat;
+	set32(phy_base + APCIE_PHY_CTRL, APCIE_PHY_CTRL_CLK0REQ);
+	if (poll32(phy_base + APCIE_PHY_CTRL, APCIE_PHY_CTRL_CLK0ACK, APCIE_PHY_CTRL_CLK0ACK, 50000)) {
+		printk("pcie: Timeout enabling PHY CLK0\n");
+		return -EINVAL;
+	}
+
+	set32(phy_base + APCIE_PHY_CTRL, APCIE_PHY_CTRL_CLK1REQ);
+	if (poll32(phy_base + APCIE_PHY_CTRL, APCIE_PHY_CTRL_CLK1ACK, APCIE_PHY_CTRL_CLK1ACK, 50000)) {
+		printk("pcie: Timeout enabling PHY CLK1\n");
+		return -EINVAL;
+	}
+
+	clear32(phy_base + APCIE_PHY_CTRL, APCIE_PHY_CTRL_RESET);
+	udelay(1);
+
+	/* ??? */
+	set32(rc_base + 0x24, 1);
+	udelay(1);
+
+	int port;
+	for (port = 0; port < 3; port++) {
+		char bridge[64];
+
+		/*
+		 * Initialize RC port.
+		 */
+		set32(port_base[port] + APCIE_PORT_APPCLK, APCIE_PORT_APPCLK_EN);
+
+		/* PERSTN */
+		set32(port_base[port] + APCIE_PORT_RESET, APCIE_PORT_RESET_DIS);
+
+		if (poll32(port_base[port] + APCIE_PORT_STATUS, APCIE_PORT_STATUS_RUN,
+			   APCIE_PORT_STATUS_RUN, 250000))
+			return -EINVAL;
+
+		/* Make Designware PCIe Core registers writable. */
+		set32(config_base + DWC_DBI_RO_WR, DWC_DBI_RO_WR_EN);
+
+		/* Make Designware PCIe Core registers readonly. */
+		clear32(config_base + DWC_DBI_RO_WR, DWC_DBI_RO_WR_EN);
+
+		/* Move to the next PCIe device on this bus. */
+		config_base += (1 << 15);
+	}
+
+	return 0;
+}
+
+
 static int apple_m1_pci_init(struct pci_config_window *cfg)
 {
 	struct device *dev = cfg->parent;
@@ -381,6 +461,7 @@ static int apple_m1_pci_init(struct pci_config_window *cfg)
 	struct device_node *of_port;
 	int ret, i;
 	static int count = 0;
+	void __iomem *port_base[3] = { 0, };
 
 	if (count++ < 10)
 		return -ENODEV;
@@ -398,6 +479,25 @@ static int apple_m1_pci_init(struct pci_config_window *cfg)
 	if (IS_ERR(pcie->rc))
 		return -ENODEV;
 
+	if (1) {
+		void __iomem *phy_base;
+		void __iomem *rc_base;
+		void __iomem *config_base;
+
+		phy_base = pcie->rc + 0x80000;
+		rc_base = pcie->rc;
+		config_base = cfg->win;
+		port_base[0] = devm_platform_ioremap_resource(platform, 2);
+		port_base[1] = devm_platform_ioremap_resource(platform, 3);
+		port_base[2] = devm_platform_ioremap_resource(platform, 4);
+
+		printk("base addrs: %p %p %p %p %p %p\n",
+		       phy_base, rc_base, config_base, port_base[0],
+		       port_base[1], port_base[2]);
+		apple_m1_pci_preinit(phy_base, rc_base, config_base,
+				     port_base);
+	}
+
 	i = 0;
 
 	for_each_child_of_node(dev->of_node, of_port) {
@@ -408,7 +508,8 @@ static int apple_m1_pci_init(struct pci_config_window *cfg)
 		if (IS_ERR(reset))
 			return PTR_ERR(reset);
 
-		ret = apple_pcie_setup_port(pcie, reset, i);
+		ret = apple_pcie_setup_port(pcie, reset, i,
+					    port_base[i]);
 
 		gpiod_put(reset);
 		if (ret) {
