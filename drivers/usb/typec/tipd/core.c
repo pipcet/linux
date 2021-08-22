@@ -267,7 +267,8 @@ static void tps6598x_set_data_role(struct tps6598x *tps,
 	if (!connected)
 		role_val = USB_ROLE_NONE;
 
-	usb_role_switch_set_role(tps->role_sw, role_val);
+	if (tps->role_sw)
+		usb_role_switch_set_role(tps->role_sw, role_val);
 	typec_set_data_role(tps->port, role);
 }
 
@@ -756,13 +757,8 @@ static int tps6598x_probe(struct i2c_client *client)
 
 		return ret = 0;
 	}
-	ret = tps6598x_write64(tps, TPS_REG_INT_MASK1, 0);
-	if (ret)
-		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 1);
 
-	ret = tps6598x_write64(tps, TPS_REG_INT_MASK2, 0);
-	if (ret)
-		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 2);
+	INIT_DELAYED_WORK(&tps->cd321x_status_work, tps6598x_cd321x_status_work);
 
 	ret = devm_request_threaded_irq(&client->dev, client->irq, NULL,
 					tps6598x_interrupt,
@@ -789,16 +785,6 @@ static int tps6598x_probe(struct i2c_client *client)
 	ret = tps6598x_read8(tps, TPS_REG_POWER_STATE, &pstate);
 	if (ret < 0)
 		return ret;
-
-	ret = tps6598x_write64(tps, TPS_REG_INT_MASK1, 0);
-	if (ret)
-		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 1);
-
-	ret = tps6598x_write64(tps, TPS_REG_INT_MASK2, 0);
-	if (ret)
-		dev_err(&client->dev, "failed to set default interrupt mask %d\n", 2);
-
-	INIT_DELAYED_WORK(&tps->cd321x_status_work, tps6598x_cd321x_status_work);
 
 	local_irq_save(flags);
 	if (pstate == TPS_POWER_STATE_BOOT) {
@@ -837,8 +823,7 @@ static int tps6598x_probe(struct i2c_client *client)
 
 	tps->role_sw = fwnode_usb_role_switch_get(fwnode);
 	if (IS_ERR(tps->role_sw)) {
-		ret = PTR_ERR(tps->role_sw);
-		goto err_fwnode_put;
+		tps->role_sw = NULL;
 	}
 
 	typec_cap.revision = USB_TYPEC_REV_1_2;
@@ -912,7 +897,8 @@ static int tps6598x_probe(struct i2c_client *client)
 	return 0;
 
 err_role_put:
-	usb_role_switch_put(tps->role_sw);
+	if (tps->role_sw)
+		usb_role_switch_put(tps->role_sw);
 err_fwnode_put:
 	fwnode_handle_put(fwnode);
 
@@ -922,12 +908,11 @@ err_fwnode_put:
 static int tps6598x_remove(struct i2c_client *client)
 {
 	struct tps6598x *tps = i2c_get_clientdata(client);
-	u8 ssps_data[2] = { TPS_POWER_STATE_BOOT, 0 };
 
 	tps6598x_disconnect(tps, 0);
 	typec_unregister_port(tps->port);
-	usb_role_switch_put(tps->role_sw);
-	tps6598x_exec_cmd(tps, "SSPS", sizeof(ssps_data), ssps_data, 0, NULL);
+	if (tps->role_sw)
+		usb_role_switch_put(tps->role_sw);
 
 	return 0;
 }
