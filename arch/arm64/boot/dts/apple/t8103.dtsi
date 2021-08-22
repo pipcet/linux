@@ -155,7 +155,7 @@
 					compatible = "usb-c-connector";
 					label = "USB-C B";
 					power-role = "source";
-					data-role = "host";
+					data-role = "dual-role";
 
 					ports {
 						#address-cells = <1>;
@@ -188,7 +188,7 @@
 					compatible = "usb-c-connector";
 					label = "USB-C B";
 					power-role = "source";
-					data-role = "host";
+					data-role = "dual-role";
 
 					ports {
 						#address-cells = <1>;
@@ -339,13 +339,15 @@
 			#size-cells = <2>;
 			ranges;
 			nonposted-mmio;
+			usb-role-switch;
 
 			dwc3_0_real: dwc3@382280000 {
 				compatible = "snps,dwc3";
 				reg = <0x3 0x82280000 0x0 0x100000>;
 				interrupt-parent = <&aic>;
 				interrupts = <AIC_IRQ 777 IRQ_TYPE_LEVEL_HIGH>;
-				dr_mode = "host";
+				dr_mode = "dual-role";
+				usb-role-switch;
 				iommus = <&dwc3_0_dart_0 0>, <&dwc3_0_dart_1 1>;
 				port@0 {
 					reg = <0>;
@@ -385,14 +387,16 @@
 			#size-cells = <2>;
 			ranges;
 			nonposted-mmio;
+			usb-role-switch;
 
 			dwc3_1_real: dwc3@502280000 {
 				compatible = "snps,dwc3";
 				reg = <0x5 0x02280000 0x0 0x100000>;
 				interrupt-parent = <&aic>;
 				interrupts = <AIC_IRQ 857 IRQ_TYPE_LEVEL_HIGH>;
-				dr_mode = "host";
+				dr_mode = "dual-role";
 				iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
+				usb-role-switch;
 				port@0 {
 					reg = <0>;
 					typec1_usb_hs: endpoint {
