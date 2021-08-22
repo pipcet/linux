@@ -851,7 +851,6 @@ config CHARGER_SURFACE
 
 config BATTERY_APPLE_M1
         tristate "Battery status driver for Apple M1 devices"
-        depends on SENSORS_APPLE_M1_SMC
         depends on ARCH_APPLE
         help
           bla bla.
