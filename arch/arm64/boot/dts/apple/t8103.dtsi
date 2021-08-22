@@ -132,6 +132,146 @@
 		dma-ranges;
 		nonposted-mmio;
 
+		i2c0: i2c0@20a110000 {
+			compatible = "apple,i2c-v0";
+			reg = <0x2 0x35010000 0x0 0x4000>;
+			interrupt-parent = <&aic>;
+			interrupts = <0 627 4>;
+			clocks = <&clk24>;
+			pinctrl-0 = <&i2c0_pins>;
+			pinctrl-names = "default";
+			#address-cells = <0x1>;
+			#size-cells = <0x0>;
+
+			hpm0: hpm0@38 {
+				compatible = "ti,tps6598x";
+				reg = <0x38>;
+				interrupt-parent = <&pinctrl_ap>;
+				interrupts = <106 8>;
+
+				no-long-writes;
+
+				typec0: connector {
+					compatible = "usb-c-connector";
+					label = "USB-C B";
+					power-role = "source";
+					data-role = "host";
+
+					ports {
+						#address-cells = <1>;
+						#size-cells = <0>;
+						port@0 {
+							reg = <0>;
+							typec0_con_hs: endpoint {
+								remote-endpoint = <&typec0_usb_hs>;
+							};
+						};
+						port@1 {
+							reg = <1>;
+							typec0_con_ss: endpoint {
+								remote-endpoint = <&typec0_phy_ss>;
+							};
+						};
+					};
+				};
+			};
+
+			hpm1: hpm1@3f {
+				compatible = "ti,tps6598x";
+				reg = <0x3f>;
+				interrupt-parent = <&pinctrl_ap>;
+				interrupts = <106 8>;
+
+				no-long-writes;
+
+				typec1: connector {
+					compatible = "usb-c-connector";
+					label = "USB-C B";
+					power-role = "source";
+					data-role = "host";
+
+					ports {
+						#address-cells = <1>;
+						#size-cells = <0>;
+						port@0 {
+							reg = <0>;
+							typec1_con_hs: endpoint {
+								remote-endpoint = <&typec1_usb_hs>;
+							};
+						};
+						port@1 {
+							reg = <1>;
+							typec1_con_ss: endpoint {
+								remote-endpoint = <&typec1_phy_ss>;
+							};
+						};
+					};
+				};
+			};
+		};
+
+		atcphy1: atcphy1@500000000 {
+			compatible = "apple,atc-phy-m1";
+			clocks = <&clk24>;
+			reg = <0x5 0x00000000 0x0 0x1000000
+				0x5 0x02000000 0x0 0x1080000>;
+			#phy-cells = <0>;
+			usb-role-switch;
+			orientation-switch;
+			mode-switch;
+			accessory;
+			#clock-cells = <0>;
+			clock-output-names = "utmi1clk";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				port@0 {
+					reg = <0>;
+					typec1_phy_ss: endpoint {
+						phandle = <0x0e>;
+					};
+				};
+				port@1 {
+					reg = <1>;
+					typec1_pipe_ss: endpoint {
+						phandle = <0x2f>;
+					};
+				};
+			};
+		};
+
+
+        atcphy0: atcphy0@380000000 {
+            compatible = "apple,atc-phy-m1";
+            clocks = <&clk24>;
+            reg = <0x3 0x80000000 0x0 0x1000000
+                   0x3 0x82000000 0x0 0x1080000>;
+            #phy-cells = <0>;
+            usb-role-switch;
+            orientation-switch;
+            mode-switch;
+            accessory;
+            #clock-cells = <0>;
+            clock-output-names = "utmi0clk";
+
+            ports {
+                #address-cells = <1>;
+                #size-cells = <0>;
+                port@0 {
+                    reg = <0>;
+                    typec0_phy_ss: endpoint {
+		    	phandle = <0x0f>;
+                    };
+                };
+                port@1 {
+                    reg = <1>;
+                    typec0_pipe_ss: endpoint {
+		    	phandle = <0x2e>;
+                    };
+                };
+            };
+        };
 		applestart: applestart@23b754004 {
 			compatible = "apple,startcpu";
 			reg = <0x2 0x3b754004 0x0 0xc   0x2 0x10050000 0x0 0x8   0x2 0x10030fb0 0x0 0x4
@@ -192,7 +332,7 @@
 			#iommu-cells = <1>;
 		};
 
-		dwc3_0: usb@382280000 {
+		dwc3_0: usb0@382280000 {
 			compatible = "apple,dwc3-m1";
 			reg = <0x3 0x80000000 0x0 0x100000 0x3 0x82000000 0x0 0x1000000>;
 			#address-cells = <2>;
@@ -207,6 +347,18 @@
 				interrupts = <AIC_IRQ 777 IRQ_TYPE_LEVEL_HIGH>;
 				dr_mode = "host";
 				iommus = <&dwc3_0_dart_0 0>, <&dwc3_0_dart_1 1>;
+				port@0 {
+					reg = <0>;
+					typec0_usb_hs: endpoint {
+						remote-endpoint = <&typec0_con_hs>;
+					};
+				};
+				port@1 {
+					reg = <1>;
+					typec0_usb_ss: endpoint {
+						remote-endpoint = <&typec0_pipe_ss>;
+					};
+				};
 			};
 		};
 
@@ -226,7 +378,7 @@
 			#iommu-cells = <1>;
 		};
 
-		dwc3_1: usb@502280000{
+		dwc3_1: usb1@502280000 {
 			compatible = "apple,dwc3-m1";
 			reg = <0x5 0x00000000 0x0 0x100000 0x5 0x02000000 0x0 0x1000000>;
 			#address-cells = <2>;
@@ -241,6 +393,18 @@
 				interrupts = <AIC_IRQ 857 IRQ_TYPE_LEVEL_HIGH>;
 				dr_mode = "host";
 				iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
+				port@0 {
+					reg = <0>;
+					typec1_usb_hs: endpoint {
+						remote-endpoint = <&typec1_con_hs>;
+					};
+				};
+				port@1 {
+					reg = <1>;
+					typec1_usb_ss: endpoint {
+						remote-endpoint = <&typec1_pipe_ss>;
+					};
+				};
 			};
 		};
 
@@ -270,8 +434,7 @@
 		    #interrupt-cells = <2>;
 
 		    i2c0_pins: i2c0_pins {
-			pins = "gpio192", "gpio188";
-			function = "periph";
+		        pinmux = <APPLE_PINMUX(192, 1) APPLE_PINMUX(188, 1)>;
 		    };
 
 			pcie_pins: pcie-pins {
