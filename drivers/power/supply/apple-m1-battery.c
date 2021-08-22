@@ -3,11 +3,12 @@
  * Copyright (C) 2021 Pip Cet <pipcet@gmail.com>
  */
 
-#include <linux/module.h>
 #include <linux/device.h>
-#include <linux/power_supply.h>
-#include <linux/platform_device.h>
+#include <linux/kvbox.h>
+#include <linux/module.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
+#include <linux/power_supply.h>
 
 static const enum power_supply_property properties[] = {
 	POWER_SUPPLY_PROP_CAPACITY,
@@ -15,44 +16,38 @@ static const enum power_supply_property properties[] = {
 	POWER_SUPPLY_PROP_ENERGY_FULL,
 };
 
-extern int apple_m1_smc_read_percentage(struct device *dev, u32 key,
-					int *pval);
-
-extern int apple_m1_smc_read_ui16(struct device *dev, u32 key,
-				  int *pval);
-
-extern int apple_m1_smc_read_float(struct device *dev, u32 key,
-				   int *pval);
-
 struct apple_battery {
-	struct platform_device *pdev;
+	struct device *dev;
 	struct power_supply *psy;
+	struct kvbox *kvbox;
+	struct kvbox_prop sbas;
 	u32 key_capacity;
 	u32 key_energy_now;
 	u32 key_energy_full;
 };
+
+static int float_to_percentage(void *ptr)
+{
+	u32 f = *(u32 *)ptr;
+	u32 exp = f >> 23;
+	u32 mantissa = f & ((1<<23) - 1);
+	mantissa += (1<<23);
+	return mantissa >> (17 + (0x85 - exp));
+}
 
 static int apple_battery_get_property(struct power_supply *psy,
 				      enum power_supply_property psp,
 				      union power_supply_propval *val)
 {
 	struct apple_battery *batt = power_supply_get_drvdata(psy);
-	u32 key;
 	switch (psp) {
-	case POWER_SUPPLY_PROP_CAPACITY:
-		key = batt->key_capacity;
-		apple_m1_smc_read_percentage(&batt->pdev->dev, key,
-					     &val->intval);
+	case POWER_SUPPLY_PROP_ENERGY_FULL:
+		val->intval = 100;
 		return 0;
 	case POWER_SUPPLY_PROP_ENERGY_NOW:
-		key = batt->key_energy_now;
-		apple_m1_smc_read_float(&batt->pdev->dev, key,
-				       &val->intval);
-		return 0;
-	case POWER_SUPPLY_PROP_ENERGY_FULL:
-		key = batt->key_energy_full;
-		apple_m1_smc_read_ui16(&batt->pdev->dev, key,
-				       &val->intval);
+	case POWER_SUPPLY_PROP_CAPACITY:
+		kvbox_read_interruptible(batt->kvbox, &batt->sbas);
+		val->intval = float_to_percentage(batt->sbas.data);
 		return 0;
 	default:
 		return -EINVAL;
@@ -79,9 +74,10 @@ static int apple_battery_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct power_supply_config *cfg =
-	       devm_kzalloc(dev, sizeof *cfg, GFP_KERNEL);
+	       devm_kzalloc(dev, sizeof(*cfg), GFP_KERNEL);
 	struct apple_battery *batt =
-	       devm_kzalloc(dev, sizeof *batt, GFP_KERNEL);
+	       devm_kzalloc(dev, sizeof(*batt), GFP_KERNEL);
+	void *key;
 
 	if (cfg == NULL)
 		return -ENOMEM;
@@ -89,37 +85,31 @@ static int apple_battery_probe(struct platform_device *pdev)
 	if (batt == NULL)
 		return -ENOMEM;
 
-	cfg->of_node = pdev->dev.of_node;
-	cfg->fwnode = pdev->dev.fwnode;
+	cfg->of_node = dev->of_node;
+	cfg->fwnode = dev->fwnode;
 	cfg->drv_data = batt;
-	batt->pdev = pdev;
+	batt->dev = dev;
+	batt->sbas.key = key = devm_kzalloc(dev, 4, GFP_KERNEL);
+	batt->sbas.data = devm_kzalloc(dev, 4, GFP_KERNEL);
+	if (!batt->sbas.key || !batt->sbas.data)
+		return -ENOMEM;
+	memcpy(key, "SBAS", 4);
+	batt->sbas.key_len = 4;
+	batt->sbas.data_len = 4;
+
+	batt->kvbox = kvbox_request(dev, 0);
+	if (IS_ERR(batt->kvbox))
+		return PTR_ERR(batt->kvbox);
+
 	batt->psy = devm_power_supply_register(dev, &desc, cfg);
-
-	of_property_read_u32_index(dev->of_node, "reg", 0,
-				   &batt->key_capacity);
-
-	of_property_read_u32_index(dev->of_node, "reg", 2,
-				   &batt->key_energy_now);
-
-	of_property_read_u32_index(dev->of_node, "reg", 4,
-				   &batt->key_energy_full);
-
 	if (IS_ERR(batt->psy))
 		return PTR_ERR(batt->psy);
 
 	return 0;
 }
 
-static int apple_battery_remove(struct platform_device *pdev)
-{
-	struct apple_battery *batt = platform_get_drvdata(pdev);
-	power_supply_unregister(batt->psy);
-
-	return 0;
-}
-
 static const struct of_device_id apple_battery_of_match[] = {
-	{ .compatible = "apple,battery" },
+	{ .compatible = "kvbox-battery" },
 	{ },
 };
 
@@ -131,7 +121,6 @@ static struct platform_driver apple_battery_driver = {
 		.of_match_table = of_match_ptr(apple_battery_of_match),
 	},
 	.probe = apple_battery_probe,
-	.remove = apple_battery_remove,
 };
 module_platform_driver(apple_battery_driver);
 
