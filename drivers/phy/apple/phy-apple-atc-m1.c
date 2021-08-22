@@ -920,7 +920,7 @@ static int apple_atcphy_m1_probe(struct platform_device *pdev)
 			break;
 		}
 
-		atc->reg[atc->num_reg] = devm_ioremap(atc->dev, rsrc->start, resource_size(rsrc));
+		atc->reg[atc->num_reg] = devm_ioremap_np(atc->dev, rsrc->start, resource_size(rsrc));
 		if(IS_ERR(atc->reg[atc->num_reg])) {
 			err = PTR_ERR(atc->reg[atc->num_reg]);
 			dev_err(atc->dev, "failed to map MMIO %d: %d.\n", atc->num_reg, err);
