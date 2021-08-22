@@ -922,10 +922,12 @@ err_fwnode_put:
 static int tps6598x_remove(struct i2c_client *client)
 {
 	struct tps6598x *tps = i2c_get_clientdata(client);
+	u8 ssps_data[2] = { TPS_POWER_STATE_BOOT, 0 };
 
 	tps6598x_disconnect(tps, 0);
 	typec_unregister_port(tps->port);
 	usb_role_switch_put(tps->role_sw);
+	tps6598x_exec_cmd(tps, "SSPS", sizeof(ssps_data), ssps_data, 0, NULL);
 
 	return 0;
 }
