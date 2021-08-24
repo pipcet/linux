@@ -256,7 +256,8 @@ void brcmf_rx_event(struct device *dev, struct sk_buff *rxp);
 
 int brcmf_alloc(struct device *dev, struct brcmf_mp_device *settings);
 /* Indication from bus module regarding presence/insertion of dongle. */
-int brcmf_attach(struct device *dev);
+int brcmf_attach_preirq(struct device *dev);
+int brcmf_attach_postirq(struct device *dev);
 /* Indication from bus module regarding removal/absence of dongle */
 void brcmf_detach(struct device *dev);
 void brcmf_free(struct device *dev);
