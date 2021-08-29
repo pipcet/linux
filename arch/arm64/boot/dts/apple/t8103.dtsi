@@ -633,6 +633,23 @@
 			};
 		};
 
+		disp_dart: iommu@2313040000 {
+			compatible = "apple,t8103-dart";
+			reg = <0x2 0x31304000 0x0 0x4000>;
+			#iommu-cells = <1>;
+			interrupt-parent = <&aic>;
+			interrupts = <0 0x1bd /* is this right? */ 4>;
+		};
+
+		disp: display-subsystem {
+			compatible = "apple,t8103-disp";
+			iommus = <&disp_dart 0>, <&disp_dart 4>;
+			reg = <0x2 0x30840000 0x0 0x40000>;
+			reg-names = "fbcontrols";
+			mboxes = <&dcp_asc_dcp 0>;
+			#kvbox-cells = <1>;
+		};
+
 		dcp_mbox: dcp_mbox@231c08000 {
 		        compatible = "apple,apple-mailbox";
 			reg = <0x2 0x31c08000 0 0x4000>;
