@@ -24,6 +24,33 @@
 	};
 
 
+	soc {
+		i2c0@20a110000 {
+			hpm0@38 {
+			 	connector {
+				 	data-role = "host";
+				};
+			};
+			hpm1@3f {
+			 	connector {
+				 	data-role = "host";
+				};
+			};
+		};
+
+		usb0@382280000 {
+			dwc3@382280000 {
+				dr_mode = "host";
+			};
+		};
+
+		usb1@502280000 {
+			dwc3@502280000 {
+				dr_mode = "host";
+			};
+		};
+	};
+
 	fiq: interrupt-controller {
 	     	use-for-ipi;
 	};
