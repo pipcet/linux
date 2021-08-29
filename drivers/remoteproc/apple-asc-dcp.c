@@ -73,8 +73,6 @@ static void apple_dcp_work_func(struct work_struct *work)
 	if (!dcp->buf) {
 		void *buf;
 		dma_addr_t iova;
-		void *l1, *l2;
-		u64 l2_iova;
 
 		spin_unlock_irqrestore(&dcp->lock, flags);
 		buf = dma_alloc_coherent(dcp->rproc->dev.parent, dcp->buf_size,
