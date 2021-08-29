@@ -24,7 +24,7 @@
 	};
 
 	soc {
-		spi@32510c000 {
+		spi@23510c000 {
 			keyboard@0 {
 				compatible = "input,applespi-kbd-v1";
 				reg = <0>;
