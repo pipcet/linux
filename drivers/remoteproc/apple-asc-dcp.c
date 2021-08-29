@@ -237,6 +237,7 @@ int apple_dcp_transaction(struct mbox_chan *chan,
 	wait_for_completion(&dcp->buffer_complete);
 	goto again;
 }
+EXPORT_SYMBOL(apple_dcp_transaction);
 
 static int apple_dcp_send_data(struct mbox_chan *chan, void *msg_header)
 {
