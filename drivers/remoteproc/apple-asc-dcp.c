@@ -221,6 +221,7 @@ int apple_dcp_transaction(struct mbox_chan *chan,
 	msg->mbox.payload &= 0xffff; /* preserve CTX, ACK, TYPE */
 	msg->mbox.payload |= (offset << 16) & 0xffff0000; /* offset */
 	msg->mbox.payload |= dcp_msg_size << 32; /* size */
+	msg->mbox.endpoint = dcp->endpoint;
 	ret = mbox_copy_and_send(dcp->chan, &msg->mbox);
 	if (ret < 0) {
 		/* XXX rewind buffer here? */
