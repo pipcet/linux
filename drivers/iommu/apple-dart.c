@@ -110,6 +110,7 @@ struct apple_dart {
 	u32 supports_bypass : 1;
 	u32 force_bypass : 1;
 	u32 locked_page_tables : 1;
+	u32 fake_locked : 1;
 
 	struct iommu_group *sid2group[DART_MAX_STREAMS];
 	struct iommu_device iommu;
@@ -344,7 +345,8 @@ static int apple_dart_hw_reset(struct apple_dart *dart)
 
 	config = readl(dart->regs + DART_CONFIG);
 
-	if (config & DART_CONFIG_LOCK) {
+	if (config & DART_CONFIG_LOCK ||
+	    dart->fake_locked) {
 		ret = apple_dart_setup_locked_page_tables(dart);
 
 		if (ret)
@@ -795,9 +797,11 @@ static int apple_dart_def_domain_type(struct device *dev)
 		})
 
 #define FLUSH_CHUNK() do {			\
+		if (start != end) {					\
 		struct iommu_resv_region *region = iommu_alloc_resv_region(start, end - start, IOMMU_WRITE|IOMMU_READ, IOMMU_RESV_RESERVED); \
-		list_add_tail(&region->list, head);			\
-		printk("reserved %016llx-%016llx\n", start, end);		\
+list_add_tail(&region->list, head);					\
+		printk("reserved %016llx-%016llx\n", start, end);	\
+	}								\
 		start = end = iova_start;				\
 	} while (0);
 
@@ -1001,6 +1005,9 @@ static int apple_dart_probe(struct platform_device *pdev)
 		dart->regs = devm_ioremap_np(dev, res->start, resource_size(res));
 	} else
 		dart->regs = devm_ioremap_np(dev, res->start, resource_size(res));
+	if (of_property_read_bool(pdev->dev.of_node, "fake-locked"))
+		dart->fake_locked = 1;
+
 	if (IS_ERR(dart->regs))
 		return PTR_ERR(dart->regs);
 
