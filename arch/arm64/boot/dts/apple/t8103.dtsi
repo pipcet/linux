@@ -639,6 +639,7 @@
 			#iommu-cells = <1>;
 			interrupt-parent = <&aic>;
 			interrupts = <0 0x1bd /* is this right? */ 4>;
+			fake-locked;
 		};
 
 		disp: display-subsystem {
@@ -904,7 +905,7 @@
 	backlight: backlight {
 		compatible = "apple,apple-m1-backlight";
 		max-brightness = <0x20d0000>;
-		mboxes = <&dcp_asc_dcp 0>;
+		kvboxes = <&disp 0>;
 		power-gpios = <&smc_gpio 1 0>;
 	};
 
