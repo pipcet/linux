@@ -87,7 +87,7 @@ static int apple_regdump_replay(struct apple_drm_private *apple)
 	} regdump_stretches[] = {
 		{ 0x12000, 0x34000, "color curves" },
 		{ 0x10030, 0x12000, "general FB regs" },
-		{ 0x10004, 0x10008, "FB regs master off switch" },
+		{ 0x10004, 0x10014, "FB regs master off switch" },
 		{ 0x10014, 0x10030, "guarded FB regs" },
 		{ 0x10030, 0x10034, "pixel format" },
 	};
