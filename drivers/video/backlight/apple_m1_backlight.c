@@ -1,5 +1,6 @@
 #include <linux/apple-asc.h>
 #include <linux/backlight.h>
+#include <linux/kvbox.h>
 #include <linux/mailbox_client.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -10,8 +11,9 @@
 struct apple_backlight {
 	struct device *dev;
 	struct backlight_device *backlight_device;
-	struct mbox_client cl;
-	struct mbox_chan *chan;
+	struct kvbox *kvbox;
+	struct kvbox_prop prop;
+	u32 brightness;
 	u64 max_brightness;
 };
 
@@ -23,22 +25,15 @@ static const struct of_device_id apple_backlight_of_match[] = {
 static int apple_backlight_update_status(struct backlight_device *bld)
 {
 	struct apple_backlight *backlight = bl_get_data(bld);
-	struct apple_dcp_mbox_msg *msg = kzalloc(sizeof(*msg) + 0x100,
-						 GFP_KERNEL);
+	static u32 key = 15;
 	int ret;
-	u32 payload[] = { 15, backlight_get_brightness(bld), 0 };
-	/* message type 2, command context */
-	msg->mbox.payload = 0x0202;
-	msg->mbox.endpoint = 0x37;
-	/* entry point A352 */
-	msg->dcp.code = 0x41333532;
-	msg->dcp.len_input = 8;
-	msg->dcp.len_output = 4;
-	memcpy(msg->dcp_data, payload, sizeof(payload));
 
-	printk("sending msg\n");
-	ret = apple_dcp_transaction(backlight->chan, msg);
-	kfree(msg);
+	backlight->brightness = backlight_get_brightness(bld);
+	backlight->prop.key = &key;
+	backlight->prop.key_len = sizeof(key);
+	backlight->prop.data = &backlight->brightness;
+	backlight->prop.data_len = sizeof(backlight->brightness);
+	ret = kvbox_write_interruptible(backlight->kvbox, &backlight->prop);
 
 	if (ret < 0)
 		return ret;
@@ -69,13 +64,10 @@ static int apple_backlight_probe(struct platform_device *pdev)
 	of_property_read_u64(pdev->dev.of_node, "max-brightness",
 			     &backlight->max_brightness);
 
-	backlight->cl.dev = backlight->dev;
-	backlight->cl.rx_callback = apple_backlight_receive_data;
-	backlight->cl.tx_tout = TIMEOUT_MSEC;
-	backlight->chan = mbox_request_channel(&backlight->cl, 0);
-	if (IS_ERR(backlight->chan)) {
-		dev_err(backlight->dev, "couldn't acquire mailbox channel");
-		return PTR_ERR(backlight->chan);
+	backlight->kvbox = kvbox_request(&pdev->dev, 0);
+	if (IS_ERR(backlight->kvbox)) {
+		dev_err(backlight->dev, "couldn't acquire kvbox");
+		return PTR_ERR(backlight->kvbox);
 	}
 
 	props.max_brightness = backlight->max_brightness;
