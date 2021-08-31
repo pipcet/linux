@@ -44,9 +44,12 @@
 
 struct apple_drm_private {
 	struct drm_device	drm;
+	bool forced_to_4k;
 	struct mbox_client	cl;
 	struct mbox_chan *	dcp;
 	struct kvbox		kvbox;
+	struct work_struct	work;
+	struct apple_dcp_mbox_msg *msg;
 	spinlock_t		lock;
 	bool			write;
 	struct kvbox_prop *	prop;
@@ -55,6 +58,7 @@ struct apple_drm_private {
 	u32 *			regdump;
 };
 
+#define DCP_LATE_INIT_SIGNAL 0x41343031
 #define DCP_SET_DIGITAL_MODE 0x41343132
 #define DCP_APPLY_PROPERTY 0x41333532 /* A352: applyProperty(unsigned int, unsigned int) */
 
@@ -109,6 +113,50 @@ static int apple_regdump_replay(struct apple_drm_private *apple)
 	return 0;
 }
 
+static int apple_external(struct apple_drm_private *apple)
+{
+	struct apple_dcp_mbox_msg *msg = devm_kzalloc(apple->drm.dev,
+						      sizeof(*msg) + 0x100,
+						      GFP_KERNEL);
+	const u32 mode_args[] = { 0x59, 0x43 };
+	int ret;
+
+	if (!msg)
+		return -ENOMEM;
+
+	ret = apple_regdump_create(apple);
+	if (ret < 0)
+		return ret;
+
+	msg->mbox.payload = 0x202; /* message type 2, command context */
+	msg->dcp.code = DCP_LATE_INIT_SIGNAL;
+	msg->dcp.len_input = 8;
+	msg->dcp.len_output = 4;
+	memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
+
+	ret = apple_dcp_transaction(apple->dcp, msg);
+	devm_kfree(apple->drm.dev, msg);
+	if (ret < 0)
+		return ret;
+
+	msleep(10000);
+
+	ret = apple_regdump_replay(apple);
+
+	if (ret < 0)
+		return ret;
+
+	writel(4 * 3840, apple->regs + 0x100a8);
+	writel(3840, apple->regs + 0x100ac);
+	writel(0xf000870, apple->regs + 0x100c0);
+	writel(0xf000870, apple->regs + 0x100c4);
+	writel(0xf000870, apple->regs + 0x100d0);
+	writel(0xf000870, apple->regs + 0x10118);
+	writel(0xf000870, apple->regs + 0x10128);
+
+	return 0;
+}
+
 static int apple_switch_4k(struct apple_drm_private *apple)
 {
 	struct apple_dcp_mbox_msg *msg = devm_kzalloc(apple->drm.dev,
@@ -153,6 +201,15 @@ static int apple_switch_4k(struct apple_drm_private *apple)
 	return 0;
 }
 
+static void apple_write_work_func(struct work_struct *work)
+{
+	struct apple_drm_private *apple = container_of(work, struct apple_drm_private, work);
+	printk("apple_write_work_func\n");
+	apple_dcp_transaction(apple->dcp, apple->msg);
+	kfree(apple->msg);
+	apple->msg = NULL;
+}
+
 static int apple_drm_write(struct kvbox *kvbox, struct kvbox_prop *prop)
 {
 	struct apple_drm_private *apple = kvbox->priv;
@@ -195,9 +252,10 @@ static int apple_drm_write(struct kvbox *kvbox, struct kvbox_prop *prop)
 	memcpy(msg->dcp_data, &key, sizeof(key));
 	memcpy(msg->dcp_data + sizeof(key), &val, sizeof(val));
 
-	ret = apple_dcp_transaction(apple->dcp, msg);
-	kfree(msg);
+	apple->msg = msg;
+	schedule_work(&apple->work);
 
+	spin_unlock_irqrestore(&apple->lock, flags);
 	if (ret < 0)
 		return ret;
 
@@ -355,22 +413,21 @@ static const struct drm_connector_funcs apple_connector_funcs = {
 static int apple_connector_get_modes(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
+	struct apple_drm_private *apple = to_apple_drm_private(dev);
 	struct drm_display_mode *mode;
 
-	/* STUB */
-
-	struct drm_display_mode dummy = {
-#ifndef NOTDEF
-		DRM_SIMPLE_MODE(3840, 2160, 508, 286),
-#else
-		DRM_SIMPLE_MODE(1920, 1080, 508, 286),
-#endif
+	struct drm_display_mode dummy_4k = {
+		DRM_SIMPLE_MODE(3840, 2160, 1920, 1080),
 	};
+	struct drm_display_mode dummy_macbook = {
+		DRM_SIMPLE_MODE(2560, 1600, 2560, 1600),
+	};
+	struct drm_display_mode *dummy = apple->forced_to_4k ? &dummy_4k : &dummy_macbook;
 
-	dummy.clock = 60 * dummy.hdisplay * dummy.vdisplay;
-	drm_mode_set_name(&dummy);
+	dummy->clock = 60 * dummy->hdisplay * dummy->vdisplay;
+	drm_mode_set_name(dummy);
 
-	mode = drm_mode_duplicate(dev, &dummy);
+	mode = drm_mode_duplicate(dev, dummy);
 	if (!mode) {
 		DRM_ERROR("Failed to create a new display mode\n");
 		return 0;
@@ -438,6 +495,10 @@ static int apple_platform_probe(struct platform_device *pdev)
 	if (IS_ERR(apple))
 		return PTR_ERR(apple);
 
+	INIT_WORK(&apple->work, apple_write_work_func);
+	if (of_property_read_bool(pdev->dev.of_node, "switch-to-4k")) {
+		apple->forced_to_4k = true;
+	}
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 
 	if (ret)
@@ -521,11 +582,20 @@ static int apple_platform_probe(struct platform_device *pdev)
 	apple->kvbox.ops = &apple_drm_kvbox_ops;
 	spin_lock_init(&apple->lock);
 	apple->kvbox.priv = apple;
+	INIT_LIST_HEAD(&apple->kvbox.requests);
 	kvbox_register(&apple->kvbox);
 
-	ret = apple_switch_4k(apple);
-	if (ret)
-		return ret;
+	if (of_property_read_bool(pdev->dev.of_node, "external-interface")) {
+		ret = apple_external(apple);
+		if (ret)
+			return ret;
+	}
+
+	if (of_property_read_bool(pdev->dev.of_node, "switch-to-4k")) {
+		ret = apple_switch_4k(apple);
+		if (ret)
+			return ret;
+	}
 
 	return 0;
 
