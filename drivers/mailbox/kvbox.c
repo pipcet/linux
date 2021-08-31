@@ -29,6 +29,10 @@ static int kvbox_fake_request_r(struct kvbox *kvbox,
 	return 0;
 }
 
+static void kvbox_nop(void *priv)
+{
+}
+
 static int kvbox_make_request(struct kvbox *kvbox, struct kvbox_prop *prop,
 			      int (*r)(struct kvbox *, struct kvbox_prop *),
 			      kvbox_cb_t callback, void *priv)
@@ -42,7 +46,7 @@ static int kvbox_make_request(struct kvbox *kvbox, struct kvbox_prop *prop,
 
 	init_completion(&request->tx_complete);
 	request->kvbox = kvbox;
-	request->callback = callback;
+	request->callback = callback ? callback : kvbox_nop;
 	request->priv = priv;
 	list_add(&request->list, &kvbox->requests);
 	ret = r(kvbox, prop);
