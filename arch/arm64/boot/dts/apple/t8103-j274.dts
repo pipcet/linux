@@ -49,6 +49,10 @@
 				dr_mode = "host";
 			};
 		};
+
+		disp: display-subsystem@230840000 {
+	              	switch-to-4k;
+		};
 	};
 
 	fiq: interrupt-controller {
