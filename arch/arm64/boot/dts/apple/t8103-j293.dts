@@ -60,5 +60,84 @@
 				dr_mode = "dual-role";
 			};
 		};
+
+#if 0
+		dcpext_dart: iommu@27130c000 {
+			compatible = "apple,t8103-dart";
+			reg = <0x2 0x7130c000 0 0x4000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 0x1bd IRQ_TYPE_LEVEL_HIGH>;
+			#iommu-cells = <1>;
+		};
+
+		dcpext_mbox: dcpext_mbox@271c08000 {
+		        compatible = "apple,apple-mailbox";
+			reg = <0x2 0x71c08000 0 0x4000>;
+			#mbox-cells = <1>; /* could be 0, but that requires extra code */
+			interrupt-parent = <&aic>;
+			interrupts = <0 0x1d2 4  0 0x1d5 4>;
+		};
+
+		dcpext_asc: remoteproc@271c00000 {
+		        compatible = "apple,apple-asc";
+			reg = <0x2 0x71c00000 0 0x8000>;
+			rproc-name = "dcpext";
+			iommus = <&dcpext_dart 15>;
+			mboxes = <&dcpext_mbox 0>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			dcpext_asc_mgmt: dcpext_asc_mgmt@0 {
+				compatible = "apple,apple-asc-mgmt", "apple,apple-asc-system-endpoint";
+				mboxes = <&dcpext_asc 0x0>;
+				rprocs = <&dcpext_asc>;
+				iommus = <&dcpext_dart 15>;
+			};
+			dcpext_asc_panic: dcpext_asc_panic@1 {
+				compatible = "apple,apple-asc-panic", "apple,apple-asc-system-endpoint";
+				mboxes = <&dcpext_asc 0x1>;
+				rprocs = <&dcpext_asc>;
+				iommus = <&dcpext_dart 15>;
+			};
+			dcpext_asc_syslog: dcpext_asc_syslog@2 {
+				compatible = "apple,apple-asc-syslog", "apple,apple-asc-system-endpoint";
+				mboxes = <&dcpext_asc 0x2>;
+				rprocs = <&dcpext_asc>;
+				iommus = <&dcpext_dart 15>;
+			};
+			dcpext_asc_ioreport: dcpext_asc_ioreport@4 {
+				compatible = "apple,apple-asc-iorpt", "apple,apple-asc-system-endpoint";
+				mboxes = <&dcpext_asc 0x4>;
+				rprocs = <&dcpext_asc>;
+				iommus = <&dcpext_dart 15>;
+			};
+			dcpext_asc_dcp: dcpext_asc_dcp@37 {
+				compatible = "apple,apple-asc-dcp", "apple,apple-asc-system-endpoint";
+				mboxes = <&dcpext_asc 0x37>;
+				rprocs = <&dcpext_asc>;
+				#mbox-cells = <1>; /* could be 0, but requires extra code */
+				iommus = <&dcpext_dart 15>;
+			};
+		};
+
+		dispext_dart: iommu@2713040000 {
+			compatible = "apple,t8103-dart";
+			reg = <0x2 0x71304000 0x0 0x4000>;
+			#iommu-cells = <1>;
+			interrupt-parent = <&aic>;
+			interrupts = <0 0x1bd /* is this right? */ 4>;
+			fake-locked;
+		};
+
+		dispext: display-subsystem@270840000 {
+			compatible = "apple,t8103-disp";
+			iommus = <&dispext_dart 0>, <&dispext_dart 4>;
+			reg = <0x2 0x70840000 0x0 0x40000>;
+			reg-names = "fbcontrols";
+			mboxes = <&dcpext_asc_dcp 0>;
+			#kvbox-cells = <1>;
+			switch-to-4k;
+			external-interface;
+		};
+#endif
 	};
 };
