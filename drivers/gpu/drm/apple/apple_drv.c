@@ -204,10 +204,10 @@ static int apple_switch_4k(struct apple_drm_private *apple)
 static void apple_write_work_func(struct work_struct *work)
 {
 	struct apple_drm_private *apple = container_of(work, struct apple_drm_private, work);
-	printk("apple_write_work_func\n");
 	apple_dcp_transaction(apple->dcp, apple->msg);
 	kfree(apple->msg);
 	apple->msg = NULL;
+	apple->prop = NULL;
 }
 
 static int apple_drm_write(struct kvbox *kvbox, struct kvbox_prop *prop)
