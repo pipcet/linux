@@ -33,17 +33,13 @@ static int apple_backlight_update_status(struct backlight_device *bld)
 	backlight->prop.key_len = sizeof(key);
 	backlight->prop.data = &backlight->brightness;
 	backlight->prop.data_len = sizeof(backlight->brightness);
-	ret = kvbox_write_interruptible(backlight->kvbox, &backlight->prop);
+	ret = kvbox_write(backlight->kvbox, &backlight->prop,
+			  NULL, NULL);
 
 	if (ret < 0)
 		return ret;
 
 	return 0;
-}
-
-static void apple_backlight_receive_data(struct mbox_client *cl, void *msg)
-{
-	/* That's very interesting. Tell me more. */
 }
 
 static struct backlight_ops apple_backlight_ops = {
