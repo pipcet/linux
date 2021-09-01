@@ -218,7 +218,32 @@ static int kvbox_debugfs_size_show(struct seq_file *s, void *ptr)
 
 	return 0;
 }
+
+static ssize_t kvbox_debugfs_size_write(struct file *file,
+					const char __user *user_buf,
+					size_t size, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct kvbox_debugfs_data *debugfs_data = s->private;
+	unsigned long long new_size;
+
+	if (kstrtoull_from_user(user_buf, size, 0, &new_size) < 0)
+		return -EFAULT;
+
+	debugfs_data->prop->data_len = new_size;
+
+	return size;
+}
+
 DEFINE_SHOW_ATTRIBUTE(kvbox_debugfs_size);
+static const struct file_operations real_kvbox_debugfs_size_fops = {
+	.owner = THIS_MODULE,
+	.open = kvbox_debugfs_size_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+	.write = kvbox_debugfs_size_write,
+};
 
 static int kvbox_debugfs_create_prop_size(struct kvbox *kvbox, struct kvbox_prop *prop,
 					  struct dentry *dentry)
@@ -230,7 +255,7 @@ static int kvbox_debugfs_create_prop_size(struct kvbox *kvbox, struct kvbox_prop
 	data->kvbox = kvbox;
 	data->prop = prop;
 
-	debugfs_create_file("size", 0400, dentry, data, &kvbox_debugfs_size_fops);
+	debugfs_create_file("size", 0400, dentry, data, &real_kvbox_debugfs_size_fops);
 
 	return 0;
 }
@@ -364,12 +389,31 @@ static int kvbox_debugfs_create_prop(struct kvbox *kvbox, struct kvbox_prop *pro
 
 static struct dentry *kvbox_debugfs_dir;
 
+static int kvbox_debugfs_mkdir(struct user_namespace *ns, struct inode *inode, struct dentry *dentry, umode_t mode)
+{
+	struct kvbox *kvbox = inode->i_private;
+	struct kvbox_prop *prop = kzalloc(sizeof(*prop), GFP_KERNEL); // leax
+	const unsigned char *name = dentry->d_name.name;
+	size_t key_len = strlen(name);
+	void *key = devm_kzalloc(kvbox->dev, key_len, GFP_KERNEL);
+	memcpy(key, name, key_len);
+	prop->key = key;
+	prop->key_len = key_len;
+	prop->data_len = 4; // XXX
+	prop->type = NULL;
+	prop->extra = NULL;
+	kvbox_debugfs_create_prop(kvbox, prop);
+
+	return 0;
+}
+
 static int kvbox_debugfs_create(struct kvbox *kvbox)
 {
 	size_t i;
 
-	if (!kvbox_debugfs_dir)
+	if (!kvbox_debugfs_dir) {
 		kvbox_debugfs_dir = debugfs_create_dir("kvbox", NULL);
+	}
 
 	if (IS_ERR(kvbox_debugfs_dir)) {
 		return PTR_ERR(kvbox_debugfs_dir);
@@ -378,6 +422,12 @@ static int kvbox_debugfs_create(struct kvbox *kvbox)
 	kvbox->debugfs_dir = debugfs_create_dir(dev_name(kvbox->dev), kvbox_debugfs_dir);
 	if (IS_ERR(kvbox->debugfs_dir)) {
 		return PTR_ERR(kvbox->debugfs_dir);
+	}
+	{
+		struct inode_operations *i_op = kzalloc(sizeof(*i_op), GFP_KERNEL);
+		memcpy(i_op, kvbox->debugfs_dir->d_inode->i_op, sizeof(*i_op));
+		kvbox->debugfs_dir->d_inode->i_op = i_op;
+		i_op->mkdir = kvbox_debugfs_mkdir;
 	}
 
 	for (i = 0; i < kvbox->num_known_props; i++)
