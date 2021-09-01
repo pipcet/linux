@@ -28,7 +28,7 @@ static int apple_backlight_update_status(struct backlight_device *bld)
 	int ret;
 
 	backlight->brightness = backlight_get_brightness(bld);
-	backlight->prop.key = "0000000f"
+	backlight->prop.key = "0000000f";
 	backlight->prop.key_len = 8;
 	backlight->prop.data = &backlight->brightness;
 	backlight->prop.data_len = sizeof(backlight->brightness);
