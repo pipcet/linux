@@ -25,12 +25,11 @@ static const struct of_device_id apple_backlight_of_match[] = {
 static int apple_backlight_update_status(struct backlight_device *bld)
 {
 	struct apple_backlight *backlight = bl_get_data(bld);
-	static u32 key = 15;
 	int ret;
 
 	backlight->brightness = backlight_get_brightness(bld);
-	backlight->prop.key = &key;
-	backlight->prop.key_len = sizeof(key);
+	backlight->prop.key = "0000000f"
+	backlight->prop.key_len = 8;
 	backlight->prop.data = &backlight->brightness;
 	backlight->prop.data_len = sizeof(backlight->brightness);
 	ret = kvbox_write(backlight->kvbox, &backlight->prop,
