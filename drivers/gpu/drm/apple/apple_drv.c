@@ -44,7 +44,7 @@
 
 struct apple_drm_private {
 	struct drm_device	drm;
-	bool forced_to_4k;
+	bool			forced_to_4k;
 	struct mbox_client	cl;
 	struct mbox_chan *	dcp;
 	struct kvbox		kvbox;
@@ -204,10 +204,14 @@ static int apple_switch_4k(struct apple_drm_private *apple)
 static void apple_write_work_func(struct work_struct *work)
 {
 	struct apple_drm_private *apple = container_of(work, struct apple_drm_private, work);
+	unsigned long flags;
+
 	apple_dcp_transaction(apple->dcp, apple->msg);
+	spin_lock_irqsave(&apple->lock, flags);
 	kfree(apple->msg);
 	apple->msg = NULL;
 	apple->prop = NULL;
+	spin_unlock_irqrestore(&apple->lock, flags);
 }
 
 static int apple_drm_write(struct kvbox *kvbox, struct kvbox_prop *prop)
@@ -225,11 +229,15 @@ static int apple_drm_write(struct kvbox *kvbox, struct kvbox_prop *prop)
 	if (!msg)
 		return -ENOMEM;
 
-	if (key_len != 4)
+	if (key_len != 8)
 		return -EINVAL;
 
 	if (val_len != 4)
 		return -EINVAL;
+
+	ret = kstrtou32(key, 16, &key);
+	if (ret < 0)
+		return ret;
 
 	memcpy(&key, prop->key, sizeof(key));
 	memcpy(&val, prop->data, sizeof(val));
