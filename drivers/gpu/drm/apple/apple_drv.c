@@ -235,11 +235,10 @@ static int apple_drm_write(struct kvbox *kvbox, struct kvbox_prop *prop)
 	if (val_len != 4)
 		return -EINVAL;
 
-	ret = kstrtou32(key, 16, &key);
+	ret = kstrtou32(prop->key, 16, &key);
 	if (ret < 0)
 		return ret;
 
-	memcpy(&key, prop->key, sizeof(key));
 	memcpy(&val, prop->data, sizeof(val));
 
 	if (!spin_trylock_irqsave(&apple->lock, flags))
