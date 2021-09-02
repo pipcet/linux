@@ -389,6 +389,17 @@ static int kvbox_debugfs_create_prop(struct kvbox *kvbox, struct kvbox_prop *pro
 
 static struct dentry *kvbox_debugfs_dir;
 
+static struct foo_struct {
+	struct work_struct work;
+	struct kvbox *kvbox;
+	struct kvbox_prop *prop;
+} foo;
+
+static void foo_work(struct work_struct *work)
+{
+	kvbox_debugfs_create_prop(foo.kvbox, foo.prop);
+}
+
 static int kvbox_debugfs_mkdir(struct user_namespace *ns, struct inode *inode, struct dentry *dentry, umode_t mode)
 {
 	struct kvbox *kvbox = inode->i_private;
@@ -402,7 +413,8 @@ static int kvbox_debugfs_mkdir(struct user_namespace *ns, struct inode *inode, s
 	prop->data_len = 4; // XXX
 	prop->type = NULL;
 	prop->extra = NULL;
-	kvbox_debugfs_create_prop(kvbox, prop);
+	INIT_WORK(&foo.work, foo_work);
+	schedule_work(&foo.work);
 
 	return 0;
 }
@@ -428,6 +440,7 @@ static int kvbox_debugfs_create(struct kvbox *kvbox)
 		memcpy(i_op, kvbox->debugfs_dir->d_inode->i_op, sizeof(*i_op));
 		kvbox->debugfs_dir->d_inode->i_op = i_op;
 		i_op->mkdir = kvbox_debugfs_mkdir;
+		kvbox->debugfs_dir->d_inode->i_private = kvbox;
 	}
 
 	for (i = 0; i < kvbox->num_known_props; i++)
