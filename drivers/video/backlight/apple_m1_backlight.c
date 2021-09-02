@@ -15,6 +15,7 @@ struct apple_backlight {
 	struct kvbox_prop prop;
 	u32 brightness;
 	u64 max_brightness;
+	struct gpio_desc *gpiod;
 };
 
 static const struct of_device_id apple_backlight_of_match[] = {
@@ -38,17 +39,30 @@ static int apple_backlight_update_status(struct backlight_device *bld)
 	if (ret < 0)
 		return ret;
 
+	if (backlight->gpiod)
+		gpiod_set_value_cansleep(backlight->gpiod, backlight_get_brightness(bld) != 0);
+
 	return 0;
+}
+
+static int apple_backlight_check_fb(struct backlight_device *bld,
+				    struct fb_info *info)
+{
+	struct apple_backlight *backlight = bl_get_data(bld);
+
+	return 1;
 }
 
 static struct backlight_ops apple_backlight_ops = {
 	.update_status = apple_backlight_update_status,
+	.check_fb = apple_backlight_check_fb,
 };
 
 static int apple_backlight_probe(struct platform_device *pdev)
 {
 	struct apple_backlight *backlight;
 	struct backlight_properties props;
+	int ret = 0;
 
 	backlight = devm_kzalloc(&pdev->dev, sizeof *backlight, GFP_KERNEL);
 	if (!backlight)
@@ -61,9 +75,17 @@ static int apple_backlight_probe(struct platform_device *pdev)
 
 	backlight->kvbox = kvbox_request(&pdev->dev, 0);
 	if (IS_ERR(backlight->kvbox)) {
-		dev_err(backlight->dev, "couldn't acquire kvbox");
+		dev_err(backlight->dev, "couldn't acquire kvbox\n");
 		return PTR_ERR(backlight->kvbox);
 	}
+
+	backlight->gpiod = devm_gpiod_get_optional(&pdev->dev,
+						   "enable", GPIOD_ASIS);
+	if (IS_ERR(backlight->gpiod)) {
+		dev_err(backlight->dev, "couldn't acquire GPIO\n");
+		return PTR_ERR(backlight->gpiod);
+	}
+
 
 	props.max_brightness = backlight->max_brightness;
 	props.type = BACKLIGHT_FIRMWARE;
@@ -80,6 +102,11 @@ static int apple_backlight_probe(struct platform_device *pdev)
 
 	if (IS_ERR(backlight->backlight_device))
 		return PTR_ERR(backlight->backlight_device);
+
+	if (backlight->gpiod)
+		ret = gpiod_direction_output(backlight->gpiod, backlight_get_brightness(backlight->backlight_device));
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
