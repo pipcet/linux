@@ -267,6 +267,7 @@ static int kvbox_debugfs_value_show(struct seq_file *s, void *ptr)
 	struct kvbox_prop prop;
 	struct completion c;
 	void *buf;
+	int ret;
 
 	memcpy(&prop, debugfs_data->prop, sizeof prop);
 
@@ -278,13 +279,17 @@ static int kvbox_debugfs_value_show(struct seq_file *s, void *ptr)
 
 	init_completion(&c);
 
-	kvbox_read(kvbox, &prop, kvbox_complete, &c);
+	ret = kvbox_read(kvbox, &prop, kvbox_complete, &c);
+	if (ret >= 0) {
+		wait_for_completion(&c);
 
-	wait_for_completion(&c);
-
-	seq_write(s, prop.data, prop.data_len);
+		seq_write(s, prop.data, prop.data_len);
+	}
 
 	devm_kfree(kvbox->dev, buf);
+
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
