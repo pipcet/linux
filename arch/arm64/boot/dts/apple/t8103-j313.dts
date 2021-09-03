@@ -2,7 +2,7 @@
 /*
  * Apple MacBook Pro (13-inch, M1, 2020)
  *
- * target-type: J313
+ * target-type: J293
  *
  * Copyright The Asahi Linux Contributors
  */
@@ -14,8 +14,8 @@
 #include "t8103.dtsi"
 
 / {
-	compatible = "apple,j313", "apple,t8103", "apple,arm-platform";
-	model = "Apple MacBook Air (unknown)";
+	compatible = "apple,j293", "apple,t8103", "apple,arm-platform";
+	model = "Apple MacBook Pro (13-inch, M1, 2020)";
 
 	chosen {
 		#address-cells = <2>;
@@ -145,5 +145,6 @@
 		compatible = "apple,apple-m1-backlight";
 		max-brightness = <0x20d0000>;
 		kvboxes = <&disp 0>;
+		enable-gpios = <&smc_gpio 1 0>;
 	};
 };
