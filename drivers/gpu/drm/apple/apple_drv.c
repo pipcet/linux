@@ -615,7 +615,8 @@ static int apple_platform_remove(struct platform_device *pdev)
 {
 	struct drm_device *drm = platform_get_drvdata(pdev);
 
-	drm_dev_unregister(drm);
+	if (drm)
+		drm_dev_unregister(drm);
 
 	return 0;
 }
