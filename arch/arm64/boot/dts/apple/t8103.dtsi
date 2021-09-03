@@ -902,13 +902,6 @@
 	};
 
 
-	backlight: backlight {
-		compatible = "apple,apple-m1-backlight";
-		max-brightness = <0x20d0000>;
-		kvboxes = <&disp 0>;
-		power-gpios = <&smc_gpio 1 0>;
-	};
-
 	framebuffer@9e0df8000 {
 		#address-cells = <0x02>;
 		#size-cells = <0x02>;
