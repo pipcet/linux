@@ -413,6 +413,8 @@ static int kvbox_debugfs_mkdir(struct user_namespace *ns, struct inode *inode, s
 	prop->data_len = 4; // XXX
 	prop->type = NULL;
 	prop->extra = NULL;
+	foo.prop = prop;
+	foo.kvbox = kvbox;
 	INIT_WORK(&foo.work, foo_work);
 	schedule_work(&foo.work);
 
