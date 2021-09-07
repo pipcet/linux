@@ -45,17 +45,8 @@ static int apple_backlight_update_status(struct backlight_device *bld)
 	return 0;
 }
 
-static int apple_backlight_check_fb(struct backlight_device *bld,
-				    struct fb_info *info)
-{
-	struct apple_backlight *backlight = bl_get_data(bld);
-
-	return 1;
-}
-
 static struct backlight_ops apple_backlight_ops = {
 	.update_status = apple_backlight_update_status,
-	.check_fb = apple_backlight_check_fb,
 };
 
 static int apple_backlight_probe(struct platform_device *pdev)
