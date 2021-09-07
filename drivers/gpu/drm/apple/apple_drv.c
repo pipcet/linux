@@ -60,6 +60,25 @@ struct apple_drm_private {
 	struct backlight_device *backlight;
 };
 
+static int apple_match_backlight(struct device *dev, void *ptr)
+{
+	struct apple_drm_private *apple = ptr;
+	struct backlight_device *backlight;
+
+	backlight = devm_of_find_backlight(dev);
+	if (!IS_ERR(backlight))
+		apple->backlight = backlight;
+
+	return 0;
+}
+
+static void apple_find_backlight(struct apple_drm_private *apple)
+{
+	if (!apple->backlight) {
+		device_for_each_child(apple->drm.dev, apple, apple_match_backlight);
+	}
+}
+
 #define DCP_LATE_INIT_SIGNAL 0x41343031
 #define DCP_SET_DIGITAL_MODE 0x41343132
 #define DCP_APPLY_PROPERTY 0x41333532 /* A352: applyProperty(unsigned int, unsigned int) */
@@ -432,6 +451,13 @@ static int apple_connector_get_modes(struct drm_connector *connector)
 		DRM_SIMPLE_MODE(2560, 1600, 2560, 1600),
 	};
 	struct drm_display_mode *dummy = apple->forced_to_4k ? &dummy_4k : &dummy_macbook;
+	u32 resolution = readl(apple->regs + 0x100c0);
+	u32 resx = resolution >> 16;
+	u32 resy = resolution & 0xffff;
+	dummy->hdisplay = dummy->hsync_start =
+		dummy->hsync_end = dummy->htotal = resx;
+	dummy->vdisplay = dummy->vsync_start =
+		dummy->vsync_end = dummy->vtotal = resy;
 
 	dummy->clock = 60 * dummy->hdisplay * dummy->vdisplay;
 	drm_mode_set_name(dummy);
@@ -462,12 +488,26 @@ struct drm_connector_helper_funcs apple_connector_helper_funcs = {
 static void apple_crtc_atomic_enable(struct drm_crtc *crtc,
 				     struct drm_atomic_state *state)
 {
+	struct apple_drm_private *apple = to_apple_drm_private(crtc->dev);
+	apple_find_backlight(apple);
+
+	if (apple->backlight) {
+		apple->backlight->props.power = FB_BLANK_UNBLANK;
+		backlight_update_status(apple->backlight);
+	}
 	/* TODO */
 }
 
 static void apple_crtc_atomic_disable(struct drm_crtc *crtc,
 				      struct drm_atomic_state *state)
 {
+	struct apple_drm_private *apple = to_apple_drm_private(crtc->dev);
+	apple_find_backlight(apple);
+
+	if (apple->backlight) {
+		apple->backlight->props.power = FB_BLANK_POWERDOWN;
+		backlight_update_status(apple->backlight);
+	}
 	/* TODO */
 }
 
@@ -494,11 +534,7 @@ static void apple_dpms(struct drm_encoder *encoder, int mode)
 {
 	struct apple_drm_private *apple = to_apple_drm_private(encoder->dev);
 
-	if (!apple->backlight)
-		apple->backlight = devm_of_find_backlight(apple->drm.dev);
-
-	if (PTR_ERR(apple->backlight))
-		apple->backlight = NULL;
+	apple_find_backlight(apple);
 
 	if (apple->backlight) {
 		apple->backlight->props.power = mode == DRM_MODE_DPMS_ON ?
@@ -632,6 +668,8 @@ static int apple_platform_probe(struct platform_device *pdev)
 		if (ret)
 			return ret;
 	}
+
+	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 
 	return 0;
 
