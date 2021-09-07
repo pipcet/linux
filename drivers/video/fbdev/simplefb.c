@@ -124,7 +124,7 @@ static int simplefb_match_backlight(struct device *dev, void *ptr)
 	struct simplefb_params *params = ptr;
 	struct backlight_device *backlight;
 
-	backlight = devm_of_find_backlight(&pdev->dev);
+	backlight = devm_of_find_backlight(dev);
 	if (!IS_ERR(backlight))
 		params->backlight = backlight;
 
@@ -182,7 +182,7 @@ static int simplefb_parse_dt(struct platform_device *pdev,
 		params->backlight = backlight;
 
 	if (!params->backlight) {
-		of_platform_populate(&pdev->dev.of_node, NULL, NULL, &pdev->dev);
+		of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 		device_for_each_child(&pdev->dev, params, simplefb_match_backlight);
 	}
 #endif
