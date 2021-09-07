@@ -10,6 +10,7 @@
 
 #include <linux/apple-asc.h>
 #include <linux/module.h>
+#include <linux/backlight.h>
 #include <linux/clk.h>
 #include <linux/component.h>
 #include <linux/delay.h>
@@ -56,6 +57,7 @@ struct apple_drm_private {
 	void __iomem		*regs;
 
 	u32 *			regdump;
+	struct backlight_device *backlight;
 };
 
 #define DCP_LATE_INIT_SIGNAL 0x41343031
@@ -488,6 +490,27 @@ static const struct drm_crtc_helper_funcs apple_crtc_helper_funcs = {
 	.atomic_disable	= apple_crtc_atomic_disable,
 };
 
+static void apple_dpms(struct drm_encoder *encoder, int mode)
+{
+	struct apple_drm_private *apple = to_apple_drm_private(encoder->dev);
+
+	if (!apple->backlight)
+		apple->backlight = devm_of_find_backlight(apple->drm.dev);
+
+	if (PTR_ERR(apple->backlight))
+		apple->backlight = NULL;
+
+	if (apple->backlight) {
+		apple->backlight->props.power = mode == DRM_MODE_DPMS_ON ?
+					 FB_BLANK_UNBLANK : FB_BLANK_POWERDOWN;
+		backlight_update_status(apple->backlight);
+	}
+}
+
+static struct drm_encoder_helper_funcs apple_encoder_helper_funcs = {
+	.dpms = apple_dpms,
+};
+
 static int apple_platform_probe(struct platform_device *pdev)
 {
 	struct apple_drm_private *apple;
@@ -538,7 +561,7 @@ static int apple_platform_probe(struct platform_device *pdev)
 	apple->drm.mode_config.max_width = 3840;
 	apple->drm.mode_config.max_height = 2160;
 	apple->drm.mode_config.funcs = &apple_mode_config_funcs;
-	apple->drm.mode_config.helper_private	= &apple_mode_config_helpers;
+	apple->drm.mode_config.helper_private = &apple_mode_config_helpers;
 
 	plane = apple_plane_init(&apple->drm);
 
@@ -557,11 +580,17 @@ static int apple_platform_probe(struct platform_device *pdev)
 	drm_crtc_helper_add(crtc, &apple_crtc_helper_funcs);
 
 	encoder = devm_kzalloc(&pdev->dev, sizeof(*encoder), GFP_KERNEL);
+	if (!encoder) {
+		ret = -ENOMEM;
+		goto err_unload;
+	}
 	encoder->possible_crtcs = drm_crtc_mask(crtc);
 	ret = drm_encoder_init(&apple->drm, encoder, &apple_encoder_funcs,
 			       DRM_MODE_ENCODER_TMDS /* XXX */, "apple_hdmi");
 	if (ret)
 		goto err_unload;
+
+	drm_encoder_helper_add(encoder, &apple_encoder_helper_funcs);
 
 	connector = devm_kzalloc(&pdev->dev, sizeof(*connector), GFP_KERNEL);
 
