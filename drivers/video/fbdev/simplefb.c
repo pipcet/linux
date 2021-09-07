@@ -118,6 +118,20 @@ struct simplefb_params {
 	struct backlight_device *backlight;
 };
 
+#if IS_ENABLED(CONFIG_FB_BACKLIGHT)
+static int simplefb_match_backlight(struct device *dev, void *ptr)
+{
+	struct simplefb_params *params = ptr;
+	struct backlight_device *backlight;
+
+	backlight = devm_of_find_backlight(&pdev->dev);
+	if (!IS_ERR(backlight))
+		params->backlight = backlight;
+
+	return 0;
+}
+#endif
+
 static int simplefb_parse_dt(struct platform_device *pdev,
 			     struct simplefb_params *params)
 {
@@ -166,6 +180,11 @@ static int simplefb_parse_dt(struct platform_device *pdev,
 	backlight = devm_of_find_backlight(&pdev->dev);
 	if (!IS_ERR(backlight))
 		params->backlight = backlight;
+
+	if (!params->backlight) {
+		of_platform_populate(&pdev->dev.of_node, NULL, NULL, &pdev->dev);
+		device_for_each_child(&pdev->dev, params, simplefb_match_backlight);
+	}
 #endif
 
 	return 0;
