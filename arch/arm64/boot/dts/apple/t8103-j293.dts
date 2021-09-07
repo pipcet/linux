@@ -139,10 +139,12 @@
 			external-interface;
 		};
 #endif
-	};
+		display-subsystem@230840000 {
+			backlight {
+				backlight = <&backlight>;
+			};
+		};
 
-	display-subsystem@230840000 {
-		backlight = <&backlight>;
 	};
 
 	framebuffer@9e0df8000 {
