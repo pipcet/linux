@@ -141,6 +141,16 @@
 #endif
 	};
 
+	display-subsystem@230840000 {
+		backlight = <&backlight>;
+	};
+
+	framebuffer@9e0df8000 {
+		backlight {
+			backlight = <&backlight>;
+		};
+	};
+
 	backlight: backlight {
 		compatible = "apple,apple-m1-backlight";
 		max-brightness = <0x20d0000>;
