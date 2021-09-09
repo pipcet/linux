@@ -504,6 +504,7 @@ static void apple_crtc_atomic_disable(struct drm_crtc *crtc,
 	struct apple_drm_private *apple = to_apple_drm_private(crtc->dev);
 	apple_find_backlight(apple);
 
+	printk("atomic_disable %p\n", apple->backlight);
 	if (apple->backlight) {
 		apple->backlight->props.power = FB_BLANK_POWERDOWN;
 		backlight_update_status(apple->backlight);
@@ -534,6 +535,7 @@ static void apple_dpms(struct drm_encoder *encoder, int mode)
 {
 	struct apple_drm_private *apple = to_apple_drm_private(encoder->dev);
 
+	printk("apple_dpms %d\n", mode);
 	apple_find_backlight(apple);
 
 	if (apple->backlight) {
