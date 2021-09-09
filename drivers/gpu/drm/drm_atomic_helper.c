@@ -1067,7 +1067,7 @@ disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 				funcs->prepare(encoder);
 			else if (funcs->disable)
 				funcs->disable(encoder);
-			else if (funcs->dpms)
+			if (funcs->dpms)
 				funcs->dpms(encoder, DRM_MODE_DPMS_OFF);
 		}
 
@@ -1098,7 +1098,7 @@ disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_state)
 			funcs->atomic_disable(crtc, old_state);
 		else if (funcs->disable)
 			funcs->disable(crtc);
-		else if (funcs->dpms)
+		if (funcs->dpms)
 			funcs->dpms(crtc, DRM_MODE_DPMS_OFF);
 
 		if (!drm_dev_has_vblank(dev))
