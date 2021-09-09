@@ -141,16 +141,11 @@
 #endif
 		display-subsystem@230840000 {
 			backlight {
+				compatible = "generic-backlight";
 				backlight = <&backlight>;
 			};
 		};
 
-	};
-
-	framebuffer@9e0df8000 {
-		backlight {
-			backlight = <&backlight>;
-		};
 	};
 
 	backlight: backlight {
