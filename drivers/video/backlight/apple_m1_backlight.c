@@ -88,7 +88,7 @@ static int apple_backlight_probe(struct platform_device *pdev)
 	props.fb_blank = FB_BLANK_UNBLANK;
 
 	backlight->backlight_device = devm_backlight_device_register
-		(backlight->dev, "apple_m1_backlight", NULL, backlight,
+		(backlight->dev, "apple_m1_backlight", backlight->dev, backlight,
 		 &apple_backlight_ops, &props);
 
 	if (IS_ERR(backlight->backlight_device))
