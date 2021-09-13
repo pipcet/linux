@@ -75,6 +75,18 @@ static int apple_match_backlight(struct device *dev, void *ptr)
 static void apple_find_backlight(struct apple_drm_private *apple)
 {
 	if (!apple->backlight) {
+		apple->backlight = of_find_backlight_by_node(apple->drm.dev->of_node);
+		if (IS_ERR(apple->backlight))
+			apple->backlight = NULL;
+	}
+
+	if (!apple->backlight) {
+		apple->backlight = devm_of_find_backlight(apple->drm.dev);
+		if (IS_ERR(apple->backlight))
+			apple->backlight = NULL;
+	}
+
+	if (!apple->backlight) {
 		device_for_each_child(apple->drm.dev, apple, apple_match_backlight);
 	}
 }
