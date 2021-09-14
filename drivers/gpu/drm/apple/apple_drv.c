@@ -471,7 +471,7 @@ static int apple_connector_get_modes(struct drm_connector *connector)
 	dummy->vdisplay = dummy->vsync_start =
 		dummy->vsync_end = dummy->vtotal = resy;
 
-	dummy->clock = 60 * dummy->hdisplay * dummy->vdisplay;
+	dummy->clock = 60 * dummy->hdisplay * dummy->vdisplay / 1000L;
 	drm_mode_set_name(dummy);
 
 	mode = drm_mode_duplicate(dev, dummy);
