@@ -463,14 +463,15 @@ static int apple_connector_get_modes(struct drm_connector *connector)
 		DRM_SIMPLE_MODE(2560, 1600, 2560, 1600),
 	};
 	struct drm_display_mode *dummy = apple->forced_to_4k ? &dummy_4k : &dummy_macbook;
-	u32 resolution = readl(apple->regs + 0x100c0);
-	u32 resx = resolution >> 16;
-	u32 resy = resolution & 0xffff;
-	dummy->hdisplay = dummy->hsync_start =
-		dummy->hsync_end = dummy->htotal = resx;
-	dummy->vdisplay = dummy->vsync_start =
-		dummy->vsync_end = dummy->vtotal = resy;
-
+	if (!apple->forced_to_4k) {
+		u32 resolution = readl(apple->regs + 0x100c0);
+		u32 resx = resolution >> 16;
+		u32 resy = resolution & 0xffff;
+		dummy->hdisplay = dummy->hsync_start =
+			dummy->hsync_end = dummy->htotal = resx;
+		dummy->vdisplay = dummy->vsync_start =
+			dummy->vsync_end = dummy->vtotal = resy;
+	}
 	dummy->clock = 60 * dummy->hdisplay * dummy->vdisplay / 1000L;
 	drm_mode_set_name(dummy);
 
