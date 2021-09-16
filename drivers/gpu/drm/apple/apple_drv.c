@@ -55,6 +55,7 @@ struct apple_drm_private {
 	bool			write;
 	struct kvbox_prop *	prop;
 	void __iomem		*regs;
+	dma_addr_t		dummy_buffer;
 
 	u32 *			regdump;
 	struct backlight_device *backlight;
@@ -334,7 +335,13 @@ static int apple_plane_atomic_check(struct drm_plane *plane,
 static void apple_plane_atomic_disable(struct drm_plane *plane,
 				       struct drm_atomic_state *state)
 {
-	/* TODO */
+	struct apple_drm_private *apple = to_apple_drm_private(plane->dev);
+	dma_addr_t dva = apple->dummy_buffer;
+	dev_info(apple->drm.dev, "disable: mapping dummy buffer\n");
+
+	writel(dva, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_0);
+	writel(dva + 3840 * 2160 * 4, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_1);
+	writel(SURF_FORMAT_BGRA, apple->regs + DISP0_SURF0 + SURF_FORMAT);
 }
 
 static void apple_plane_atomic_update(struct drm_plane *plane,
@@ -348,6 +355,10 @@ static void apple_plane_atomic_update(struct drm_plane *plane,
 	plane_state = drm_atomic_get_new_plane_state(state, plane);
 	fb = plane_state->fb;
 	dva = drm_fb_cma_get_gem_addr(fb, plane_state, 0);
+	if (dva == 0) {
+		dev_info(apple->drm.dev, "update: mapping dummy buffer\n");
+		dva = apple->dummy_buffer;
+	}
 
 	writel(dva, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_0);
 	writel(dva + 3840 * 2160 * 4, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_1);
@@ -587,6 +598,11 @@ static int apple_platform_probe(struct platform_device *pdev)
 
 	if (!apple->regs)
 		return -ENODEV;
+
+	if (!dma_alloc_noncoherent(apple->drm.dev, 4096 * 2048 * 4,
+				   &apple->dummy_buffer, DMA_TO_DEVICE,
+				   GFP_KERNEL))
+		return -ENOMEM;
 
 	apple->cl.dev = &pdev->dev;
 	apple->dcp = mbox_request_channel(&apple->cl, 0);
