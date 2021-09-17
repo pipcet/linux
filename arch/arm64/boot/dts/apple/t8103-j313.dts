@@ -36,6 +36,18 @@
 			};
 		};
 
+		smc_asc@23e400000 {
+			smc_asc_smc@20 {
+				smc_battery {
+					compatible = "kvbox-battery";
+					mboxes = <&smc 1>;
+					kvboxes = <&smc 0>;
+
+					capacity-prop = <FOURCC(S,B,A,S)>;
+				};
+			};
+		};
+
 		i2c0@20a110000 {
 			hpm0@38 {
 			 	connector {
