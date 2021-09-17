@@ -7,7 +7,7 @@
  * fallible single-channel mailbox implemented by Apple M1 hardware)
  * and a mailbox controller (one infallible somewhat-virtual mailbox
  * for each of the (potentially) 256 endpoints distinguished by the
- * mailbox protocol.
+ * mailbox protocol).
  *
  * It also handles CPU (but not mailbox) initialization (setting a
  * single bit) and the initial messages which cannot be sent over the
@@ -70,7 +70,6 @@ struct apple_asc {
 
 	struct work_struct pwrack_work;
 	struct completion rx_complete;
-	void *tx_msg; /* for debugging */
 	struct completion tx_complete;
 	struct completion pwrack_complete;
 
@@ -257,15 +256,14 @@ static void apple_asc_tx_done(struct mbox_client *cl, void *msg, int code)
 
 	spin_lock_irqsave(&asc->lock, flags);
 	if (list_empty(&asc->sent_messages)) {
-		asc->tx_msg = NULL;
 		complete_all(&asc->tx_complete);
 		spin_unlock_irqrestore(&asc->lock, flags);
 		return;
 	}
 
-	message =
-		list_first_entry(&asc->sent_messages, struct apple_asc_message,
-				 list);
+	message = list_first_entry(&asc->sent_messages,
+				   struct apple_asc_message,
+				   list);
 	//BUG_ON(msg != &message->msg);
 	list_del(&message->list);
 
