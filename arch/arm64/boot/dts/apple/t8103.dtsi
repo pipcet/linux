@@ -613,13 +613,6 @@
 	     		      		SMC_PIN(g,P,0,d,"PCI power");
 					SMC_PIN(g,P,1,2,"backlight power");
 				};
-				smc_battery {
-					compatible = "kvbox-battery";
-					mboxes = <&smc 1>;
-					kvboxes = <&smc 0>;
-
-					capacity-prop = <FOURCC(S,B,A,S)>;
-				};
 				smc_adc {
 					compatible = "apple,apple-asc-smc-adc";
 					kvboxes = <&smc 0>;
