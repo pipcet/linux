@@ -198,6 +198,7 @@ static int apple_switch_4k(struct apple_drm_private *apple)
 						      GFP_KERNEL);
 	const u32 mode_args[] = { 0x59, 0x43 };
 	int ret;
+	dma_addr_t dva = apple->dummy_buffer;
 
 	if (!msg)
 		return -ENOMEM;
@@ -223,6 +224,12 @@ static int apple_switch_4k(struct apple_drm_private *apple)
 
 	if (ret < 0)
 		return ret;
+
+	dev_info(apple->drm.dev, "switch_4k: mapping dummy buffer\n");
+
+	writel(dva, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_0);
+	writel(dva + 3840 * 2160 * 4, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_1);
+	writel(SURF_FORMAT_BGRA, apple->regs + DISP0_SURF0 + SURF_FORMAT);
 
 	writel(4 * 3840, apple->regs + 0x100a8);
 	writel(3840, apple->regs + 0x100ac);
@@ -483,6 +490,7 @@ static int apple_connector_get_modes(struct drm_connector *connector)
 		dummy->vdisplay = dummy->vsync_start =
 			dummy->vsync_end = dummy->vtotal = resy;
 	}
+
 	dummy->clock = 60 * dummy->hdisplay * dummy->vdisplay / 1000L;
 	drm_mode_set_name(dummy);
 
@@ -673,6 +681,12 @@ static int apple_platform_probe(struct platform_device *pdev)
 
 	drm_mode_config_reset(&apple->drm); // TODO: needed?
 
+	if (of_property_read_bool(pdev->dev.of_node, "switch-to-4k")) {
+		ret = apple_switch_4k(apple);
+		if (ret)
+			return ret;
+	}
+
 	ret = drm_dev_register(&apple->drm, 0);
 	if (ret)
 		goto err_unload;
@@ -688,12 +702,6 @@ static int apple_platform_probe(struct platform_device *pdev)
 
 	if (of_property_read_bool(pdev->dev.of_node, "external-interface")) {
 		ret = apple_external(apple);
-		if (ret)
-			return ret;
-	}
-
-	if (of_property_read_bool(pdev->dev.of_node, "switch-to-4k")) {
-		ret = apple_switch_4k(apple);
 		if (ret)
 			return ret;
 	}
