@@ -52,7 +52,7 @@ static void apple_syslog_message_func(struct work_struct *work)
 {
 	struct apple_syslog *syslog = container_of(work, struct apple_syslog,
 						   work_message);
-	static char pbuf[2048];
+	static char pbuf[0x80];
 	struct apple_mbox_msg response;
 	int i;
 	int page;
@@ -60,7 +60,7 @@ static void apple_syslog_message_func(struct work_struct *work)
 	response.payload = syslog->payload;
 	page = syslog->payload & 0x1f;
 	response.endpoint = syslog->endpoint;
-	for (i = 0; i < 2048; i++) {
+	for (i = 0; i < 0x80; i++) {
 		pbuf[i] = readb(syslog->buf + page * 0x80 + i);
 	}
 
