@@ -124,6 +124,7 @@ static void smc_receive_data(struct mbox_client *cl, void *ptr)
 	unsigned msg_type = msg->payload & 0xff;
 	struct kvbox_prop *prop;
 
+	printk("message %016llx\n", msg->payload);
 	if (0) printk("message of type %02x\n", msg_type);
 	switch (msg_type) {
 	case 0x18:
