@@ -48,7 +48,7 @@ static void apple_ans_receive_data(struct mbox_client *cl, void *msg_header)
 	struct apple_ans *ans = container_of(cl, struct apple_ans, cl);
 	struct apple_mbox_msg *msg = msg_header;
 	u64 payload = msg->payload;
-	devm_err(ans->dev, "unexpected message %016llx\n", payload);
+	dev_err(ans->dev, "unexpected message %016llx\n", payload);
 }
 
 static int apple_ans_send_data(struct mbox_chan *chan, void *msg_header)
