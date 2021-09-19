@@ -32,6 +32,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/permalloc.h>
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 #include <linux/rwsem.h>
@@ -61,11 +62,19 @@ struct apple_asc_message {
  * grab the rwsem in read mode. We do so while holding the spinlock.
  */
 
+enum apple_asc_state {
+	APPLE_ASC_OFF,
+	APPLE_ASC_RESETTABLE,
+	APPLE_ASC_HELLOABLE,
+	APPLE_ASC_ATTACHED,
+};
+
 struct apple_asc {
 	struct rproc rproc;
 	struct device *dev;
 
 	void __iomem *reg;
+	enum apple_asc_state state;
 	struct rw_semaphore rwsem;
 
 	struct work_struct pwrack_work;
@@ -157,7 +166,6 @@ static void apple_asc_pwrack_work(struct work_struct *work)
 void apple_asc_pwrack(struct rproc *rproc)
 {
 	struct apple_asc *asc = rproc->priv;
-	int ret;
 
 	complete_all(&asc->pwrack_complete);
 	INIT_WORK(&asc->pwrack_work, apple_asc_pwrack_work);
@@ -184,8 +192,6 @@ static int ep0_send(struct apple_asc *asc, u64 payload)
 
 static int ep0_recv(struct apple_asc *asc, u64 *payload)
 {
-	int ret;
-
 	wait_for_completion(&asc->rx_complete);
 
 	reinit_completion(&asc->rx_complete);
@@ -334,21 +340,36 @@ static int apple_asc_attach(struct rproc *rproc)
 	bool last;
 
 	apple_asc_lock_exclusively(&asc->rproc);
-	cpu_control = readl(asc->reg + REG_CPU_CONTROL);
-	if (!(cpu_control & CPU_CONTROL_ENABLE)) {
+	switch (asc->state) {
+	case APPLE_ASC_OFF:
+		cpu_control = readl(asc->reg + REG_CPU_CONTROL);
 		writel(cpu_control | CPU_CONTROL_ENABLE,
 		       asc->reg + REG_CPU_CONTROL);
-	} else {
+		ret = ep0_recv(asc, &payload);
+		break;
+
+	case APPLE_ASC_RESETTABLE:
 		ret = ep0_send(asc, EP0_RESET);
 		if (ret < 0)
 			goto out;
-	}
+		ret = ep0_recv(asc, &payload);
+		break;
 
-	ret = ep0_recv(asc, &payload);
+	case APPLE_ASC_HELLOABLE:
+		ret = -ETIME;
+		apple_asc_pwrack(&asc->rproc);
+		break;
+	default:
+		break;
+	}
+	permalloc_bool(asc->dev, "start-with-ehllo");
+	asc->state = APPLE_ASC_ATTACHED;
+
 	if (ret == -ETIME) {
-		printk(KERN_WARNING "timeout after reset, attempting EHLLO\n");
+		printk(KERN_WARNING "attempting EHLLO\n");
 		ret = ep0_send(asc, EP0_TYPE_EHLLO | EP0_EHLLO_MAGIC);
-	} else if (ret < 0)
+	}
+	if (ret < 0)
 		goto out;
 	else if ((payload & EP0_TYPE_MASK) == EP0_TYPE_HELLO) {
 		payload = EP0_TYPE_EHLLO | (payload & U32_MAX);
@@ -365,8 +386,7 @@ static int apple_asc_attach(struct rproc *rproc)
 
 		if ((payload & EP0_TYPE_MASK) != EP0_TYPE_EPMAP) {
 			printk("unexpected message %016llx\n", payload);
-			ret = -EINVAL;
-			goto out;
+			continue;
 		}
 
 		page = EP0_EPMAP_PAGE(payload);
@@ -429,6 +449,7 @@ static int apple_asc_probe(struct platform_device *pdev)
 	const char *name = "unknown";
 	struct device_node *np = pdev->dev.of_node;
 	struct device_node *child;
+	u32 cpu_control;
 
 	of_property_read_string(pdev->dev.of_node, "rproc-name", &name);
 
@@ -450,6 +471,15 @@ static int apple_asc_probe(struct platform_device *pdev)
 	asc->reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(asc->reg))
 		return PTR_ERR(asc->reg);
+
+	asc->state = APPLE_ASC_OFF;
+	cpu_control = readl(asc->reg + REG_CPU_CONTROL);
+	if (cpu_control & CPU_CONTROL_ENABLE) {
+		asc->state = APPLE_ASC_RESETTABLE;
+		if (of_property_read_bool(pdev->dev.of_node, "start-with-ehllo")) {
+			asc->state = APPLE_ASC_HELLOABLE;
+		}
+	}
 
 	spin_lock_init(&asc->lock);
 	INIT_LIST_HEAD(&asc->waiting_messages);
