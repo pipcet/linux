@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/permalloc.h>
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 
@@ -69,6 +70,7 @@ static void apple_panic_allocator_func(struct work_struct *work)
 						&panic->buf_iova, GFP_KERNEL);
 		printk("allocating panic buf: %016llx / %016llx\n",
 		       panic->buf, panic->buf_iova);
+		permalloc_memory(panic->dev, panic->buf, buf_size);
 		response.payload &= ~U36_MAX;
 		response.payload |= panic->buf_iova;
 	}
