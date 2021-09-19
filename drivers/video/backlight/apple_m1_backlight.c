@@ -1,5 +1,6 @@
 #include <linux/apple-asc.h>
 #include <linux/backlight.h>
+#include <linux/gpio/consumer.h>
 #include <linux/kvbox.h>
 #include <linux/mailbox_client.h>
 #include <linux/module.h>
