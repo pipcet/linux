@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/permalloc.h>
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 
@@ -90,6 +91,7 @@ static void apple_ioreport_allocator_func(struct work_struct *work)
 			size_t buf_size = 0x1000000;
 			ioreport->buf = dma_alloc_coherent(ioreport->dev, buf_size,
 							   &ioreport->buf_iova, GFP_KERNEL);
+			permalloc_memory(ioreport->dev, ioreport->buf, buf_size);
 			printk("allocating ioreport buf: %016llx / %016llx\n",
 			       ioreport->buf, ioreport->buf_iova);
 			response.payload &= ~U36_MAX;
