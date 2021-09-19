@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/permalloc.h>
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 
@@ -38,10 +39,12 @@ static void apple_syslog_allocator_func(struct work_struct *work)
 	if (syslog->buf_iova)
 		syslog->buf = devm_ioremap_np(syslog->dev, syslog->buf_iova,
 					      0x4000);
-	else
+	else {
 		syslog->buf =
 			dma_alloc_coherent(syslog->rproc->dev.parent, 16384,
 					   &syslog->buf_iova, GFP_KERNEL);
+		permalloc_memory(syslog->dev, syslog->buf, 16384);
+	}
 	response.payload = (syslog->payload &~ U36_MAX) | syslog->buf_iova;
 	response.endpoint = syslog->endpoint;
 
