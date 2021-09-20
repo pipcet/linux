@@ -837,7 +837,7 @@ static void apple_dart_get_resv_regions(struct device *dev, struct list_head *he
 					if (!l3)
 						continue;
 
-					iova_start = i2 * 0x4000 + i1 * 0x4000 * 2048 + i * 0x4000 * 2048 * 2048;
+					iova_start = i2 * 0x4000LL + i1 * 0x4000LL * 2048 + i * 0x4000LL * 2048 * 2048;
 					iova_end = iova_start + 0x4000;
 
 					while (!ENLARGE_CHUNK())
