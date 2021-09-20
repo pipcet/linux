@@ -192,7 +192,12 @@ static int ep0_send(struct apple_asc *asc, u64 payload)
 
 static int ep0_recv(struct apple_asc *asc, u64 *payload)
 {
-	wait_for_completion(&asc->rx_complete);
+	int ret;
+
+	ret = wait_for_completion_timeout(&asc->rx_complete, ASC_TIMEOUT_MSEC);
+
+	if (ret < 0)
+		return ret;
 
 	reinit_completion(&asc->rx_complete);
 	*payload = asc->ep0_payload;
@@ -372,6 +377,7 @@ static int apple_asc_attach(struct rproc *rproc)
 	if (ret < 0)
 		goto out;
 	else if ((payload & EP0_TYPE_MASK) == EP0_TYPE_HELLO) {
+	hello:
 		payload = EP0_TYPE_EHLLO | (payload & U32_MAX);
 		ret = ep0_send(asc, payload);
 		if (ret < 0)
@@ -385,6 +391,8 @@ static int apple_asc_attach(struct rproc *rproc)
 			goto out;
 
 		if ((payload & EP0_TYPE_MASK) != EP0_TYPE_EPMAP) {
+			if ((payload & EP0_TYPE_MASK) == EP0_TYPE_HELLO)
+				goto hello;
 			printk("unexpected message %016llx\n", payload);
 			continue;
 		}
