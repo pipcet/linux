@@ -139,7 +139,9 @@ static int simplefb_parse_dt(struct platform_device *pdev,
 	int ret;
 	const char *format;
 	int i;
+#if IS_ENABLED(CONFIG_FB_BACKLIGHT)
 	struct backlight_device *backlight;
+#endif
 
 	ret = of_property_read_u32(np, "width", &params->width);
 	if (ret) {
