@@ -186,8 +186,6 @@ static int apple_mailbox_probe(struct platform_device *pdev)
 
 	mb->dev = &pdev->dev;
 	dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
-	dma_addr_t dmah;
-	dma_alloc_coherent(&pdev->dev, 4096, &dmah, GFP_KERNEL);
 
 	spin_lock_init(&mb->lock);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
