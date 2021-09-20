@@ -80,3 +80,51 @@ int permalloc_memory(struct device *dev, void *memory, size_t size)
 
 	return 0;
 }
+
+int permalloc_spin_table(phys_addr_t phys_addr)
+{
+	size_t size = PAGE_SIZE;
+	char *str;
+	struct permalloc_entry *entry;
+
+	if (!permalloc_debugfs_dir)
+		permalloc_init();
+
+	str = kasprintf(GFP_KERNEL, "spin-table: <%08llx %08llx %08llx %08llx>;",
+			(u64)(phys_addr & U32_MAX), ((u64)phys_addr >> 32),
+			(u64)(size & U32_MAX), (u64)0);
+	entry = kzalloc(sizeof *entry, GFP_KERNEL);
+
+	if (!str || !entry)
+		return -ENOMEM;
+
+	entry->dev = NULL;
+	entry->str = str;
+	list_add(&entry->list, &permallocs);
+
+	return 0;
+}
+
+int permalloc_spin_code(phys_addr_t phys_addr)
+{
+	char *str;
+	struct permalloc_entry *entry;
+	size_t size = PAGE_SIZE;
+
+	if (!permalloc_debugfs_dir)
+		permalloc_init();
+
+	str = kasprintf(GFP_KERNEL, "reserved: <%08llx %08llx %08llx %08llx>;",
+			(u64)(phys_addr & U32_MAX), ((u64)phys_addr >> 32),
+			(u64)(size & U32_MAX), (u64)0);
+	entry = kzalloc(sizeof *entry, GFP_KERNEL);
+
+	if (!str || !entry)
+		return -ENOMEM;
+
+	entry->dev = NULL;
+	entry->str = str;
+	list_add(&entry->list, &permallocs);
+
+	return 0;
+}
