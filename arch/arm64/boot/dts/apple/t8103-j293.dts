@@ -51,25 +51,25 @@
 		i2c0@20a110000 {
 			hpm0@38 {
 			 	connector {
-				 	data-role = "dual-role";
+				 	data-role = "host";
 				};
 			};
 			hpm1@3f {
 			 	connector {
-				 	data-role = "dual-role";
+				 	data-role = "host";
 				};
 			};
 		};
 
 		usb0@382280000 {
 			dwc3@382280000 {
-				dr_mode = "dual-role";
+				dr_mode = "host";
 			};
 		};
 
 		usb1@502280000 {
 			dwc3@502280000 {
-				dr_mode = "dual-role";
+				dr_mode = "host";
 			};
 		};
 
