@@ -588,6 +588,8 @@ static int apple_platform_probe(struct platform_device *pdev)
 	struct drm_connector *connector;
 	int ret;
 
+	return -ENODEV;
+
 	apple = devm_drm_dev_alloc(&pdev->dev, &apple_drm_driver,
 				   struct apple_drm_private, drm);
 	if (IS_ERR(apple))
