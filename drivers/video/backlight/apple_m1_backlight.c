@@ -34,8 +34,9 @@ static int apple_backlight_update_status(struct backlight_device *bld)
 	backlight->prop.key_len = 8;
 	backlight->prop.data = &backlight->brightness;
 	backlight->prop.data_len = sizeof(backlight->brightness);
-	ret = kvbox_write(backlight->kvbox, &backlight->prop,
-			  NULL, NULL);
+	if (backlight->kvbox)
+		ret = kvbox_write(backlight->kvbox, &backlight->prop,
+				  NULL, NULL);
 
 	if (ret < 0)
 		return ret;
@@ -68,7 +69,7 @@ static int apple_backlight_probe(struct platform_device *pdev)
 	backlight->kvbox = kvbox_request(&pdev->dev, 0);
 	if (IS_ERR(backlight->kvbox)) {
 		dev_err(backlight->dev, "couldn't acquire kvbox\n");
-		return PTR_ERR(backlight->kvbox);
+		backlight->kvbox = NULL;
 	}
 
 	backlight->gpiod = devm_gpiod_get_optional(&pdev->dev,
