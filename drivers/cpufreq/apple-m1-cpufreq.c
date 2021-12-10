@@ -325,6 +325,8 @@ static int apple_m1_cpufreq_probe(struct platform_device *pdev)
 	struct resource *res;
 	unsigned int i = 0, err;
 
+	return -ENODEV;
+
 	hc = devm_kzalloc(&pdev->dev, sizeof(*hc), GFP_KERNEL);
 	if(!hc)
 		return -ENOMEM;
