@@ -379,6 +379,14 @@ static int apple_asc_attach(struct rproc *rproc)
 	else if ((payload & EP0_TYPE_MASK) == EP0_TYPE_HELLO) {
 	hello:
 		payload = EP0_TYPE_EHLLO | (payload & U32_MAX);
+		if ((payload & 0xffffffffULL) == 0x000c000b) {
+			payload &= ~0xffffffffULL;
+			payload |= 0x000b000b;
+		} else if ((payload & 0xffffffffULL) == 0x000c000c) {
+			ret = -EINVAL;
+			dev_err (asc->dev, "unsupported DCP protocol version!\n");
+			goto out;
+		}
 		ret = ep0_send(asc, payload);
 		if (ret < 0)
 			goto out;
