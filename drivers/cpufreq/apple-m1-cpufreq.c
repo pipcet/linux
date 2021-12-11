@@ -84,9 +84,14 @@ struct apple_m1_cpufreq_data {
 };
 
 static inline void rmwq(u64 clr, u64 set, void __iomem *base)
-	{ writeq((readq(base) & ~clr) | set, base); }
+{
+	writeq((readq(base) & ~clr) | set, base);
+}
+
 static inline void rmwl(u32 clr, u32 set, void __iomem *base)
-	{ writel((readl(base) & ~clr) | set, base); }
+{
+	writel((readl(base) & ~clr) | set, base);
+}
 
 static int apple_m1_cpufreq_wait_idle(struct apple_m1_cpufreq_cluster *hcc)
 {
@@ -269,8 +274,9 @@ static void apple_m1_cpufreq_hwsetup_cluster(struct apple_m1_cpufreq_data *hc, i
 	void __iomem *pmgr = hc->base[PMGR_BASE];
 	unsigned ps;
 
-	rmwq(0, CLUSTER_DVMR_ENABLE | (cluster ? CLUSTER_DVMR_ENABLE_PCPU : 0),
-	     base + CLUSTER_DVMR);
+	if (cluster == 1)
+		rmwq(0, CLUSTER_DVMR_ENABLE | (cluster ? CLUSTER_DVMR_ENABLE_PCPU : 0),
+		     base + CLUSTER_DVMR);
 
 	rmwq(0, CLUSTER_LIMIT_ENABLE, base + CLUSTER_LIMIT1);
 	rmwq(CLUSTER_LIMIT_ENABLE, 0, base + CLUSTER_LIMIT2);
@@ -291,7 +297,6 @@ static void apple_m1_cpufreq_hwsetup_cluster(struct apple_m1_cpufreq_data *hc, i
 static void apple_m1_cpufreq_hwsetup(struct apple_m1_cpufreq_data *hc)
 {
 	void __iomem **base = hc->base;
-	void __iomem *pmgr = hc->base[PMGR_BASE];
 	void __iomem *mcc = hc->base[MCC_BASE];
 	unsigned ln;
 
@@ -307,12 +312,8 @@ static void apple_m1_cpufreq_hwsetup(struct apple_m1_cpufreq_data *hc)
 	rmwq(CLUSTER_PSTATE_DISABLE, 0, base[0] + CLUSTER_PSTATE);
 	rmwq(CLUSTER_PSTATE_DISABLE, 0, base[1] + CLUSTER_PSTATE);
 
-	rmwq(0, CLUSTER_CPUTVM_ENABLE, base[0] + CLUSTER_CPUTVM);
-	rmwq(0, CLUSTER_CPUTVM_ENABLE, base[1] + CLUSTER_CPUTVM);
-	rmwl(0, PMGR_CPUTVM_ENABLE, pmgr + PMGR_CPUTVM0);
-	rmwl(0, PMGR_CPUTVM_ENABLE, pmgr + PMGR_CPUTVM1);
-	rmwl(0, PMGR_CPUTVM_ENABLE, pmgr + PMGR_CPUTVM2);
-	rmwl(0, PMGR_CPUTVM_ENABLE, pmgr + PMGR_CPUTVM3);
+	while (readl(base[0] + CLUSTER_PSTATE) & CLUSTER_PSTATE_BUSY);
+	while (readl(base[1] + CLUSTER_PSTATE) & CLUSTER_PSTATE_BUSY);
 
 	apple_m1_cpufreq_hwsetup_cluster(hc, 0);
 	apple_m1_cpufreq_hwsetup_cluster(hc, 1);
