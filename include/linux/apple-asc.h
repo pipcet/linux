@@ -2,6 +2,8 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 
+#define FOURCC(a) ((((a)[0])<<24) | (((a)[1])<<16) | (((a)[2])<<8) | (((a)[3])))
+#define U32_FOURCC(a) ((((a)[3])<<24) | (((a)[2])<<16) | (((a)[1])<<8) | (((a)[0])))
 /* A message at the physical mbox level. 64-bit payload plus 64-bit
  * information which includes, in its low-order bits, an 8-bit endpoint. */
 struct apple_mbox_msg {
