@@ -49,6 +49,7 @@ int permalloc_bool(struct device *dev, const char *name)
 
 	return 0;
 }
+EXPORT_SYMBOL(permalloc_bool);
 
 int permalloc_memory(struct device *dev, void *memory, size_t size)
 {
@@ -80,6 +81,7 @@ int permalloc_memory(struct device *dev, void *memory, size_t size)
 
 	return 0;
 }
+EXPORT_SYMBOL(permalloc_memory);
 
 int permalloc_spin_table(phys_addr_t phys_addr)
 {
