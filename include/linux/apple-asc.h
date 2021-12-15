@@ -17,6 +17,11 @@ struct apple_dcp_msg_header {
 	u32 len_output;
 };
 
+struct apple_dcp_msg {
+	struct apple_dcp_msg_header header;
+	char data[];
+};
+
 struct apple_dcp_mbox_msg {
 	struct apple_mbox_msg mbox;
 	struct apple_dcp_msg_header dcp;

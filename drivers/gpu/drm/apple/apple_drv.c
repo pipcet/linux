@@ -191,6 +191,42 @@ static int apple_external(struct apple_drm_private *apple)
 	return 0;
 }
 
+static int apple_fw_call(struct apple_drm_private *apple,
+			 u32 fourcc,
+			 void *input, size_t len_input,
+			 void *output, size_t len_output)
+{
+	struct apple_dcp_mbox_msg *msg =
+		devm_kzalloc(apple->drm.dev,
+			     sizeof(*msg) + 0x100 + len_input + len_output,
+			     GFP_KERNEL);
+	int ret;
+
+	msg->mbox.payload = 0x202;
+	msg->dcp.code = fourcc;
+	msg->dcp.len_input = len_input;
+	msg->dcp.len_output = len_output;
+	memset(msg->dcp_data, 0, len_input + len_output + 0x100);
+	memcpy(msg->dcp_data, input, len_input);
+
+	printk("starting transaction...\n"); msleep(250);
+	ret = apple_dcp_transaction(apple->dcp, msg);
+	printk("transaction completed.\n"); msleep(250);
+	devm_kfree(apple->drm.dev, msg);
+
+	return ret;
+}
+
+static int apple_fw_call_void(struct apple_drm_private *apple, u32 fourcc)
+{
+	return apple_fw_call(apple, fourcc, NULL, 0, NULL, 0);
+}
+
+static int apple_fw_call_int(struct apple_drm_private *apple, u32 fourcc, u32 data)
+{
+	return apple_fw_call(apple, fourcc, &data, 0, NULL, 4);
+}
+
 static int apple_switch_4k(struct apple_drm_private *apple)
 {
 	struct apple_dcp_mbox_msg *msg = devm_kzalloc(apple->drm.dev,
@@ -588,8 +624,6 @@ static int apple_platform_probe(struct platform_device *pdev)
 	struct drm_connector *connector;
 	int ret;
 
-	return -ENODEV;
-
 	apple = devm_drm_dev_alloc(&pdev->dev, &apple_drm_driver,
 				   struct apple_drm_private, drm);
 	if (IS_ERR(apple))
@@ -621,6 +655,32 @@ static int apple_platform_probe(struct platform_device *pdev)
 		goto err_unload;
 	}
 
+	static int counter;
+	extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
+						   struct device *dev);
+	if (!apple_dcp_reached_hardware_boot(apple->dcp, apple->cl.dev))
+		msleep(1000);
+	if (counter++ >= 0) {
+		printk("initializing...\n"); msleep(250);
+		u32 dummy = 0;
+		apple_fw_call(apple, FOURCC("A401"), NULL, 0, NULL, 4);
+		printk("initialized.\n"); msleep(250);
+	}
+	extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
+						   struct device *dev);
+	while (!apple_dcp_reached_hardware_boot(apple->dcp, apple->cl.dev))
+		msleep(1000);
+	return -ENODEV;
+	msleep(3000);
+	if (1) {
+		int set_power_state_data[3] = { 1, };
+		int update_notify_clients_dcp_data[] = {
+			0,0,0,0,0,0,0,1,1,1,0,1,1,1
+		};
+		apple_fw_call_void(apple, FOURCC("A401")); /* start_signal */
+	}
+
+	return -ENODEV;
 	/*
 	 * Remove early framebuffers (ie. simplefb). The framebuffer can be
 	 * located anywhere in RAM

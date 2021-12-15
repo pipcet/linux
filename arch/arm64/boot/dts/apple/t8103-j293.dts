@@ -36,18 +36,6 @@
 			};
 		};
 
-		smc_asc@23e400000 {
-			smc_asc_smc@20 {
-				smc_battery {
-					compatible = "kvbox-battery";
-					mboxes = <&smc 1>;
-					kvboxes = <&smc 0>;
-
-					capacity-prop = <FOURCC(S,B,A,S)>;
-				};
-			};
-		};
-
 		i2c0@20a110000 {
 			hpm0@38 {
 			 	connector {
@@ -152,14 +140,6 @@
 		};
 #endif
 		display-subsystem@230840000 {
-			backlight = <&backlight>;
-		};
-
-		backlight: backlight {
-			compatible = "apple,apple-m1-backlight";
-			max-brightness = <0x20d0000>;
-			/* kvboxes = <&disp 0>; */
-			enable-gpios = <&smc_gpio 1 0>;
 		};
 
 	};

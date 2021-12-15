@@ -2508,9 +2508,11 @@ static int __iommu_map(struct iommu_domain *domain, unsigned long iova,
 
 	while (size) {
 		size_t mapped = 0;
+		pr_debug("map: iova 0x%lx pa %pa size 0x%zx\n", iova, &paddr, size);
 
 		ret = __iommu_map_pages(domain, iova, paddr, size, prot, gfp,
 					&mapped);
+
 		/*
 		 * Some pages may have been mapped, even if an error occurred,
 		 * so we should account for those so they can be unmapped.

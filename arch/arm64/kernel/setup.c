@@ -209,8 +209,23 @@ struct apple_bootargs {
 static void __init fixup_fdt(u64 bootargs_phys, u64 base) __attribute__((__noinline__));
 static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 {
-	struct apple_bootargs *bootargs =
+	struct apple_bootargs *orig_bootargs =
 		fixmap_remap_bootargs(bootargs_phys, PAGE_KERNEL);
+	struct apple_bootargs mangled_bootargs;
+	struct apple_bootargs *bootargs = orig_bootargs;
+	memcpy(&mangled_bootargs, orig_bootargs, sizeof(mangled_bootargs));
+	bool framebuffer_enabled = bootargs->framebuffer.phys_base != 0;
+	if (bootargs->framebuffer.height <= 1024 ||
+	    bootargs->framebuffer.width <= 1024)
+		framebuffer_enabled = false;
+
+	if (!framebuffer_enabled) {
+#define MEMTOP (0x800000000 + (bootargs->mem_size))
+		bootargs->framebuffer.phys_base = MEMTOP;
+		bootargs->framebuffer.height = 0;
+		bootargs->framebuffer.width = 0;
+		bootargs->framebuffer.stride = 0;
+	}
 
 	FDT_INIT();
 }

@@ -901,7 +901,7 @@ void __noreturn arm64_serror_panic(struct pt_regs *regs, u32 esr)
 	if (regs)
 		__show_regs(regs);
 
-	nmi_panic(regs, "Asynchronous SError Interrupt");
+	//nmi_panic(regs, "Asynchronous SError Interrupt");
 
 	cpu_park_loop();
 	unreachable();

@@ -65,8 +65,8 @@ static void apple_mailbox_send_cpu_to_iop(struct apple_mailbox *mb,
 {
 	u64 msg_data[2];
 	memcpy(msg_data, msg, sizeof(msg_data));
-	if (0) dev_err(mb->mbox_controller.dev,
-				   "> %016llx %016llx [%016llx]\n",
+	if (1) dev_err(mb->mbox_controller.dev,
+				   "CPU> %016llx %016llx [%016llx]\n",
 				   msg_data[0], msg_data[1], (u64)mb);
 	writeq(msg_data[0], mb->reg + REG_SEND_CPU_TO_IOP);
 	writeq(msg_data[1], mb->reg + REG_SEND_CPU_TO_IOP + 8);
@@ -134,13 +134,18 @@ static irqreturn_t apple_mailbox_irq_iop_to_cpu_nonempty(int irq, void *ptr)
 
 	msg_data[0] = readq(mb->reg + REG_RECV_IOP_TO_CPU);
 	msg_data[1] = readq(mb->reg + REG_RECV_IOP_TO_CPU + 8);
-	if (0) dev_err(mb->mbox_controller.dev,
-				   "< %016llx %016llx [%016llx]\n",
+	if (1) dev_err(mb->mbox_controller.dev,
+				   "CPU< %016llx %016llx [%016llx]\n",
 				   msg_data[0], msg_data[1], (u64)mb);
 
 	spin_unlock_irqrestore(&mb->lock, flags);
 
-	mbox_chan_received_data(&mb->mbox_chan, msg_data);
+	if (mb->mbox_chan.cl)
+		mbox_chan_received_data(&mb->mbox_chan, msg_data);
+	else
+		dev_err(mb->mbox_controller.dev,
+			"CPU< %016llx %016llx [%016llx]: early message dropped\n",
+			msg_data[0], msg_data[1], (u64)mb);
 
 	return IRQ_HANDLED;
 }
@@ -179,6 +184,7 @@ static int apple_mailbox_probe(struct platform_device *pdev)
 	struct apple_mailbox *mb;
 	struct resource *res;
 	int ret;
+	unsigned long flags;
 
 	mb = devm_kzalloc(&pdev->dev, sizeof *mb, GFP_KERNEL);
 	if (!mb)
@@ -210,6 +216,7 @@ static int apple_mailbox_probe(struct platform_device *pdev)
 	irq_set_status_flags(mb->irq_cpu_to_iop_empty, IRQ_DISABLE_UNLAZY);
 	mb->irq_disabled = true;
 
+	spin_lock_irqsave(&mb->lock, flags);
 	ret = devm_request_irq(&pdev->dev, mb->irq_iop_to_cpu_nonempty,
 			       apple_mailbox_irq_iop_to_cpu_nonempty, 0,
 			       dev_name(&pdev->dev), mb);
@@ -225,6 +232,7 @@ static int apple_mailbox_probe(struct platform_device *pdev)
 	mb->mbox_chan.con_priv = mb;
 
 	ret = devm_mbox_controller_register(&pdev->dev, &mb->mbox_controller);
+	spin_unlock_irqrestore(&mb->lock, flags);
 	if (ret < 0)
 		return ret;
 
