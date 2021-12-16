@@ -9,6 +9,17 @@
  * Copyright (C) 2021 Pip Cet <pipcet@gmail.com>
  */
 
+/* This implements the intermediate layer of a DCP driver: upstream,
+ * it connects to an ASC mailbox for endpoint 0x37; downstream, it
+ * provides four ping-pong mailboxes: two of these mailboxes, when
+ * given a message, will modify the message, then send it back. The
+ * other two will send a message and expect the consumer to send it
+ * back, modified.
+ *
+ * Here, message means the actual pointer: the original sender must
+ * guarantee the actual buffer will survive, and be writable, until
+ * the "pong" is received, at which point any freeing must happen.
+ */
 #include <linux/apple-asc.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -25,16 +36,7 @@
 #include <linux/remoteproc.h>
 #include <linux/slab.h>
 
-#define DCP_MSG_INIT_W(m) do {					\
-		(m)->header.len_input = sizeof((m)->in);	\
-		(m)->header.len_output = sizeof((m)->out);	\
-	} while (0)
-#define DCP_MSG_INIT_R(m) do {						\
-		BUG_ON((m)->header.len_input != sizeof((m)->in));	\
-		BUH_ON((m)->header.len_output != sizeof((m)->out));	\
-	} while (0)
-
-struct apple_dcp_remote_buffer {
+struct apple_asc_dcp_remote_buffer {
 	struct list_head list;
 	u32 id;
 	u64 dva;
@@ -42,14 +44,19 @@ struct apple_dcp_remote_buffer {
 	u64 size;
 };
 
-struct apple_dcp_transaction_state {
+struct apple_asc_dcp_shmem_msg {
 	struct list_head list;
-	struct apple_dcp_mbox_msg *msg;
-	struct apple_dcp_header *header;
-	void *data;
-	struct completion complete;
-	void *buf_base;
+
+	int stream;
+	int bufno;
+
+	size_t size_raw;
+	size_t size_roundup;
+
 	size_t buf_off;
+	bool slow_free;
+	struct apple_dcp_msg *buf_msg;
+	struct apple_dcp_msg *msg;
 };
 
 /*static*/ struct apple_fourcc {
@@ -102,17 +109,17 @@ struct apple_dcp_transaction_state {
 };
 
 #define N_STREAMS		4
-#define STREAM_COMMAND		0
-#define STREAM_CALLBACK		1
-#define STREAM_ASYNC		2
-#define STREAM_NESTED_COMMAND	3
+#define STREAM_COMMAND		0 /* ping pong: receive msg, send modified msg */
+#define STREAM_CALLBACK		1 /* pong ping: send msg, receive modified msg */
+#define STREAM_ASYNC		2 /* pong ping */
+#define STREAM_NESTED_COMMAND	3 /* ping pong */
 
 #define N_BUFFERS	3
 #define BUF_COMMAND	0
 #define BUF_CALLBACK	1
 #define BUF_ASYNC	2
 
-struct apple_dcp {
+struct apple_asc_dcp {
 	struct device *dev;
 	struct rproc *rproc;
 	/* Our upstream mailbox: infallibly sends data via the Apple mbox */
@@ -141,9 +148,9 @@ struct apple_dcp {
 	} buf[N_BUFFERS];
 	u64 payload;
 	u64 endpoint;
-	bool init_complete;
 	int reached_hardware_boot;
 	struct list_head rbufs;
+	struct list_head shmem_messages;
 	int rbuf_id;
 	struct device *display_dev;
 };
@@ -156,120 +163,80 @@ size_t apple_dcp_msg_size(struct apple_dcp_msg_header *msg)
 /* XXX prototype for debugging */
 static int apple_dcp_send_data(struct mbox_chan *chan, void *msg_header);
 
-static void apple_dcp_work_func(struct work_struct *work)
+static void apple_asc_dcp_flush_func(struct work_struct *work)
 {
-	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work);
+	struct apple_asc_dcp *dcp = container_of(work, struct apple_asc_dcp,
+						 work);
 	unsigned long flags;
 
-	printk("work func\n");
 	spin_lock_irqsave(&dcp->lock, flags);
-	printk("work func locked\n");
-	if (!dcp->buf_va_size) {
-		spin_unlock_irqrestore(&dcp->lock, flags);
-		return;
-	}
+	BUG_ON(!dcp->buf_va);
 
-	if (!dcp->buf_va) {
-		void *buf_va;
-		dma_addr_t iova;
-
-		spin_unlock_irqrestore(&dcp->lock, flags);
-		buf_va = dma_alloc_coherent(dcp->rproc->dev.parent,
-					    dcp->buf_va_size,
-					    &iova, GFP_KERNEL);
-
-		memset (buf_va, 0, dcp->buf_va_size);
-		spin_lock_irqsave(&dcp->lock, flags);
-		if (dcp->buf_va) {
-			dma_free_coherent(dcp->rproc->dev.parent,
-					  dcp->buf_va_size,
-					  buf_va, iova);
-		} else {
-			struct apple_mbox_msg msg;
-			msg.payload = 0;
-			msg.endpoint = dcp->endpoint;
-
-			msg.payload |= 0x0040;
-			msg.payload |= iova << 16;
-			msg.payload |= 0xfLL << 48;
-
-			mbox_copy_and_send(dcp->chan, &msg);
-			dcp->buf_va = buf_va;
-			dcp->buf_iova = iova;
-			dcp->buf[BUF_COMMAND].base = dcp->buf_va;
-			dcp->buf[BUF_COMMAND].size = 0x8000;
-			dcp->buf[BUF_COMMAND].off = 0;
-			dcp->buf[BUF_CALLBACK].base = dcp->buf_va + 0x60000;
-			dcp->buf[BUF_CALLBACK].size = 0x8000;
-			dcp->buf[BUF_CALLBACK].off = 0;
-			dcp->buf[BUF_ASYNC].base = dcp->buf_va + 0x40000;
-			dcp->buf[BUF_ASYNC].size = 0x20000;
-			dcp->buf[BUF_ASYNC].off = 0;
-		}
-	}
-
-	if (dcp->buf_va) {
-		while (!list_empty(&dcp->buf[0].states) ||
-		       !list_empty(&dcp->buf[1].states)) {
-			printk("work func emptying\n");
+	while (true) {
+		int bufno;
+		while (!list_empty(&dcp->shmem_messages)) {
 			spin_unlock_irqrestore(&dcp->lock, flags);
-
 			msleep(100);
-
 			spin_lock_irqsave(&dcp->lock, flags);
 		}
-		if (list_empty(&dcp->buf[0].states) &&
-		    list_empty(&dcp->buf[1].states)) {
-			int bufno;
-			printk("work func rewinding\n");
-			for (bufno = 0; bufno < 1; bufno++) {
-				dcp->buf[bufno].off = 0;
-				memset(dcp->buf[bufno].base, 0, dcp->buf[bufno].size);
-			}
-		}
+		bufno = BUF_COMMAND;
+		dcp->buf[bufno].off = 0;
+		memset(dcp->buf[bufno].base, 0, dcp->buf[bufno].size);
+		break;
 	}
 	spin_unlock_irqrestore(&dcp->lock, flags);
-	complete_all(&dcp->buffer_complete);
 }
 
-static void apple_dcp_tx_done(struct mbox_client *cl, void *msg,
+static void apple_asc_dcp_tx_done(struct mbox_client *cl, void *mbox_msg,
 			      int code)
 {
-	struct apple_dcp *dcp = container_of(cl, struct apple_dcp, cl);
-	struct apple_mbox_msg *mbox = msg;
-	unsigned stream = FIELD_GET(GENMASK(11,8), mbox->payload);
-	stream = 0; // XXX
-	mbox_chan_txdone(&dcp->downstream_chans[stream], code);
+	struct apple_asc_dcp *dcp = container_of(cl, struct apple_asc_dcp, cl);
+	struct apple_mbox_msg *mbox = mbox_msg;
+	u64 payload = mbox->payload;
+	bool ack = payload & BIT(6);
+	unsigned ctx = FIELD_GET(GENMASK(11,  8), payload);
+	int stream;
+	unsigned type = FIELD_GET(GENMASK(3, 0), payload);
+
+	if (type == 2) {
+		switch (ctx) {
+		case 0:
+			stream = ack ? STREAM_CALLBACK : STREAM_NESTED_COMMAND;
+			break;
+		case 2:
+			BUG_ON(ack);
+			stream = STREAM_COMMAND;
+			break;
+		case 3:
+			BUG_ON(!ack);
+			stream = STREAM_ASYNC;
+			break;
+
+		default:
+			BUG();
+		}
+
+		mbox_chan_txdone(&dcp->downstream_chans[stream], code);
+	}
+
+	kfree(mbox_msg);
 }
 
-static void apple_dcp_work_hardware_boot_func(struct work_struct *work);
+static void apple_asc_dcp_work_hardware_boot_func(struct work_struct *work);
 
-static void apple_dcp_work_map_physical_func(struct work_struct *work);
+static void apple_asc_dcp_work_map_physical_func(struct work_struct *work);
 
-static void apple_dcp_work_map_buffer_func(struct work_struct *work);
+static void apple_asc_dcp_work_map_buffer_func(struct work_struct *work);
 
-static void apple_dcp_work_allocate_buffer_func(struct work_struct *work);
+static void apple_asc_dcp_work_allocate_buffer_func(struct work_struct *work);
 
-static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
+#if 0
 {
-	struct apple_dcp *dcp = container_of(cl, struct apple_dcp, cl);
-	struct apple_mbox_msg *msg = msg_header;
-	u64 payload = msg->payload;
-	unsigned type = payload & 0xF;
-	unsigned long flags;
-
-	spin_lock_irqsave(&dcp->lock, flags);
 	if (type == 1) {
 		dev_info(dcp->dev, "init complete\n");
-		dcp->init_complete = true;
-		INIT_WORK(&dcp->work, apple_dcp_work_func);
-		schedule_work(&dcp->work);
 		spin_unlock_irqrestore(&dcp->lock, flags);
 	} else if (type == 2) {
-		unsigned ctx = FIELD_GET(GENMASK(11,8), payload);
-		unsigned off = FIELD_GET(GENMASK(31,16), payload);
 		int bufno;
-		bool ack = payload & BIT(6);
 		switch (ctx) {
 		case 0:
 			bufno = BUF_CALLBACK; break;
@@ -279,21 +246,6 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
 			bufno = BUF_ASYNC; break;
 		}
 		if (ack) /* response */ {
-			struct apple_dcp_transaction_state *state =
-				list_first_entry(&dcp->buf[bufno].states,
-						 struct apple_dcp_transaction_state,
-						 list);
-			if (list_empty(&dcp->buf[bufno].states)) {
-				WARN_ON(1);
-			} else {
-				memcpy(state->msg->dcp_data +
-				       state->msg->dcp.len_input,
-				       state->buf_base + state->buf_off +
-				       state->msg->dcp.len_output + 12,
-				       state->msg->dcp.len_output);
-				complete_all(&state->complete);
-				list_del(&state->list);
-			}
 			spin_unlock_irqrestore(&dcp->lock, flags);
 			return;
 		} else if (ctx == 0 && !ack) {
@@ -359,19 +311,19 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
 			} else if (fourcc == FOURCC("D201")) {
 				/* map_buffer */
 				dcp->map_physical_buf = dcp->buf[bufno].base + off;
-				INIT_WORK(&dcp->work_map_physical, apple_dcp_work_map_buffer_func);
+				INIT_WORK(&dcp->work_map_physical, apple_asc_dcp_work_map_buffer_func);
 				schedule_work(&dcp->work_map_physical);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
 			} else if (fourcc == FOURCC("D451")) {
 				dcp->map_physical_buf = dcp->buf[bufno].base + off;
-				INIT_WORK(&dcp->work_map_physical, apple_dcp_work_allocate_buffer_func);
+				INIT_WORK(&dcp->work_map_physical, apple_asc_dcp_work_allocate_buffer_func);
 				schedule_work(&dcp->work_map_physical);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
 			} else if (fourcc == FOURCC("D452")) {
 				dcp->map_physical_buf = dcp->buf[bufno].base + off;
-				INIT_WORK(&dcp->work_map_physical, apple_dcp_work_map_physical_func);
+				INIT_WORK(&dcp->work_map_physical, apple_asc_dcp_work_map_physical_func);
 				schedule_work(&dcp->work_map_physical);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
@@ -387,7 +339,7 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
 				printk(KERN_EMERG "reached hardware boot!\n");
 				memcpy((u8*)dcp->buf[bufno].base + off + off1,
 				       data, sizeof data);
-				INIT_WORK(&dcp->work_hardware_boot, apple_dcp_work_hardware_boot_func);
+				INIT_WORK(&dcp->work_hardware_boot, apple_asc_dcp_work_hardware_boot_func);
 				schedule_work(&dcp->work_hardware_boot);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
@@ -487,19 +439,19 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
 			} else if (fourcc == FOURCC("D201")) {
 				/* map_buffer */
 				dcp->map_physical_buf = dcp->buf[bufno].base + off;
-				INIT_WORK(&dcp->work_map_physical, apple_dcp_work_map_buffer_func);
+				INIT_WORK(&dcp->work_map_physical, apple_asc_dcp_work_map_buffer_func);
 				schedule_work(&dcp->work_map_physical);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
 			} else if (fourcc == FOURCC("D451")) {
 				dcp->map_physical_buf = dcp->buf[bufno].base + off;
-				INIT_WORK(&dcp->work_map_physical, apple_dcp_work_allocate_buffer_func);
+				INIT_WORK(&dcp->work_map_physical, apple_asc_dcp_work_allocate_buffer_func);
 				schedule_work(&dcp->work_map_physical);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
 			} else if (fourcc == FOURCC("D452")) {
 				dcp->map_physical_buf = dcp->buf[bufno].base + off;
-				INIT_WORK(&dcp->work_map_physical, apple_dcp_work_map_physical_func);
+				INIT_WORK(&dcp->work_map_physical, apple_asc_dcp_work_map_physical_func);
 				schedule_work(&dcp->work_map_physical);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
@@ -515,7 +467,7 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
 				printk(KERN_EMERG "reached hardware boot!\n");
 				memcpy((u8*)dcp->buf[bufno].base + off + off1,
 				       data, sizeof data);
-				INIT_WORK(&dcp->work_hardware_boot, apple_dcp_work_hardware_boot_func);
+				INIT_WORK(&dcp->work_hardware_boot, apple_asc_dcp_work_hardware_boot_func);
 				schedule_work(&dcp->work_hardware_boot);
 				spin_unlock_irqrestore(&dcp->lock, flags);
 				return;
@@ -547,161 +499,27 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg_header)
 			 msg->payload);
 		spin_unlock_irqrestore(&dcp->lock, flags);
 	}
-}
+	spin_unlock_irqrestore(&dcp->lock, flags);
+	return;
 
-int apple_dcp_reached_hardware_boot(struct mbox_chan *chan, struct device *dev)
+unexpected:
+	spin_unlock_irqrestore(&dcp->lock, flags);
+	dev_warn(dcp->dev, "unexpected message %016llx\n",
+		 msg->payload);
+}
+#endif
+
+int apple_asc_dcp_reached_hardware_boot(struct mbox_chan *chan, struct device *dev)
 {
-	struct apple_dcp *dcp = chan->con_priv;
+	struct apple_asc_dcp *dcp = chan->con_priv;
 	dcp->display_dev = dev;
 	return dcp->reached_hardware_boot;
 }
-EXPORT_SYMBOL(apple_dcp_reached_hardware_boot);
+EXPORT_SYMBOL(apple_asc_dcp_reached_hardware_boot);
 
-struct apple_dcp_transaction_state *apple_dcp_transaction_state(struct mbox_chan *chan, struct apple_dcp_mbox_msg *msg, struct apple_dcp_msg_header *header, void *data, u64 payload, int bufno)
+static void apple_asc_dcp_work_map_physical_func(struct work_struct *work)
 {
-	struct apple_dcp *dcp = chan->con_priv;
-	size_t dcp_msg_size = apple_dcp_msg_size(header);
-	struct apple_dcp_transaction_state *state =
-		devm_kzalloc(dcp->dev, sizeof *state, GFP_KERNEL);
-	unsigned long flags;
-	size_t offset;
-	struct apple_mbox_msg mbox;
-
-	if (0)
-	print_hex_dump(KERN_EMERG, "tx pre:", DUMP_PREFIX_OFFSET,
-		       16, 1, header, dcp_msg_size, true);
-
-	if (!state)
-		return ERR_PTR(-ENOMEM);
-
-	init_completion(&state->complete);
-
-  again:
-	spin_lock_irqsave(&dcp->lock, flags);
-
-	if (!dcp->init_complete)
-		goto wait_retry;
-
-	if (dcp->buf_va == NULL)
-		goto schedule_wait_retry;
-
-	bufno = 0;
-	offset = dcp->buf[bufno].off;
-
-	if (dcp->buf[bufno].off + dcp_msg_size > dcp->buf[bufno].size) {
-		goto schedule_wait_retry;
-	}
-
-	memset(dcp->buf[bufno].base + dcp->buf[bufno].off, 0, round_up(dcp_msg_size, 0x40));
-	memcpy(dcp->buf[bufno].base + dcp->buf[bufno].off, header, sizeof(*header));
-	dcp->buf[bufno].off += sizeof(*header);
-	memcpy(dcp->buf[bufno].base + dcp->buf[bufno].off, data, header->len_input);
-	dcp->buf[bufno].off += header->len_input;
-	memset(dcp->buf[bufno].base + dcp->buf[bufno].off, 0, header->len_output);
-	dcp->buf[bufno].off += header->len_output;
-	dcp->buf[bufno].off = round_up(dcp->buf[bufno].off, 0x40);
-
-	state->msg = msg;
-	state->buf_base = dcp->buf[bufno].base;
-	state->buf_off = offset;
-
-	mbox.payload = payload & 0xffff;
-	mbox.payload |= offset << 16;
-	mbox.payload |= dcp_msg_size << 32;
-	mbox.endpoint = dcp->endpoint;
-	bufno = (msg->mbox.payload & 0x200) ? 0 : 1;
-	list_add(&state->list, &dcp->buf[bufno].states);
-	if (dcp->buf[bufno].base && 0)
-		print_hex_dump(KERN_EMERG, "inbuf:", DUMP_PREFIX_OFFSET,
-			       16, 1, dcp->buf[bufno].base, 256, true);
-	mbox_send_message(dcp->chan, &mbox);
-	spin_unlock_irqrestore(&dcp->lock, flags);
-	return state;
-
-  schedule_wait_retry:
-	reinit_completion(&dcp->buffer_complete);
-	INIT_WORK(&dcp->work, apple_dcp_work_func);
-	schedule_work(&dcp->work);
-  wait_retry:
-	spin_unlock_irqrestore(&dcp->lock, flags);
-	wait_for_completion(&dcp->buffer_complete);
-	goto again;
-}
-
-int apple_dcp_msg_2(struct mbox_chan *chan, struct apple_dcp_msg *msg)
-{
-	struct apple_dcp *dcp = chan->con_priv;
-	u64 payload = 0;
-	switch (chan - dcp->downstream_chans) {
-	case STREAM_COMMAND:
-		payload = 0x202;
-		break;
-	case STREAM_NESTED_COMMAND:
-		payload = 0x002;
-		break;
-	case STREAM_CALLBACK:
-		payload = 0x042;
-		break;
-	case STREAM_ASYNC:
-		payload = 0x342;
-		break;
-	}
-	int bufno = 0;
-	struct apple_dcp_transaction_state *state =
-		apple_dcp_transaction_state(chan, (void *)msg, &msg->header,
-					    &msg->data, payload, bufno);
-	unsigned long flags;
-	return 0;
-}
-
-int apple_dcp_msg(struct mbox_chan *chan, struct apple_dcp_mbox_msg *msg)
-{
-	struct apple_dcp *dcp = chan->con_priv;
-	size_t dcp_msg_size = apple_dcp_msg_size(&msg->dcp);
-	u64 payload = msg->mbox.payload;
-	int bufno = 0;
-	struct apple_dcp_transaction_state *state =
-		apple_dcp_transaction_state(chan, msg, &msg->dcp, &msg->dcp_data, payload, bufno);
-	unsigned long flags;
-
-	if (IS_ERR(state))
-		return PTR_ERR(state);
-
-	wait_for_completion(&state->complete);
-
-	memcpy(msg->dcp_data + msg->dcp.len_input,
-	       state->buf_base + state->buf_off + msg->dcp.len_input + 12,
-	       msg->dcp.len_output);
-
-#if 1
-	spin_lock_irqsave(&dcp->lock, flags);
-	if (dcp->buf[bufno].off == round_up(state->buf_off + dcp_msg_size,
-					    0x40))
-		dcp->buf[bufno].off = state->buf_off;
-	spin_unlock_irqrestore(&dcp->lock, flags);
-#endif
-
-	if (0)
-	print_hex_dump(KERN_EMERG, "tx post:", DUMP_PREFIX_OFFSET,
-		       16, 1, &msg->dcp, dcp_msg_size, true);
-	devm_kfree(dcp->dev, state);
-
-	if (dcp->buf[bufno].base && 0)
-		print_hex_dump(KERN_EMERG, "inbuf:", DUMP_PREFIX_OFFSET,
-			       16, 1, dcp->buf[bufno].base, 256, true);
-	return 0;
-}
-
-int apple_dcp_transaction(struct mbox_chan *chan,
-			  struct apple_dcp_mbox_msg *msg)
-{
-	return apple_dcp_msg(chan, msg);
-}
-EXPORT_SYMBOL(apple_dcp_transaction);
-
-static void apple_dcp_work_map_physical_func(struct work_struct *work)
-{
-	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work_map_physical);
+	struct apple_asc_dcp *dcp = container_of(work, struct apple_asc_dcp, work_map_physical);
 	void *ptr = dcp->map_physical_buf;
 	phys_addr_t pa =
 		(*((u32 *)(ptr + 12)) +
@@ -762,18 +580,19 @@ static void apple_dcp_work_map_physical_func(struct work_struct *work)
 	static_address += size;
 }
 
-static void init_buffer(struct apple_dcp *dcp)
+static void init_buffer(struct apple_asc_dcp *dcp)
 {
 	struct iommu_domain *domain = iommu_domain_alloc(dcp->display_dev->bus);
 	iommu_attach_device(domain, dcp->display_dev);
-	iommu_map(domain, 0xa0000000, 0x900000000, 32<<20, IOMMU_READ|IOMMU_WRITE);
+	extern u64 get_fb_physical_address(void);
+	iommu_map(domain, 0xa0000000, get_fb_physical_address(), 32<<20, IOMMU_READ|IOMMU_WRITE);
 	*(u64 *)phys_to_virt(0x9fff78280) =
 		*(u64 *)phys_to_virt(0x9fff48280);
 }
 
-static void apple_dcp_work_map_buffer_func(struct work_struct *work)
+static void apple_asc_dcp_work_map_buffer_func(struct work_struct *work)
 {
-	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work_map_physical);
+	struct apple_asc_dcp *dcp = container_of(work, struct apple_asc_dcp, work_map_physical);
 	static u64 static_addr = 0xc0000000;
 	void *ptr = dcp->map_physical_buf;
 	struct apple_mbox_msg mbox;
@@ -796,7 +615,7 @@ static void apple_dcp_work_map_buffer_func(struct work_struct *work)
 	u32 in_len = *(u32 *)((u8 *)(ptr + 4));
 	u32 out_len = *(u32 *)((u8 *)(ptr + 8));
 	void *va;
-	struct apple_dcp_remote_buffer *rbuf;
+	struct apple_asc_dcp_remote_buffer *rbuf;
 	list_for_each_entry(rbuf, &dcp->rbufs, list) {
 		if (rbuf->id == m->in.bufid)
 			break;
@@ -837,9 +656,9 @@ static void apple_dcp_work_map_buffer_func(struct work_struct *work)
 }
 
 
-static void apple_dcp_work_allocate_buffer_func(struct work_struct *work)
+static void apple_asc_dcp_work_allocate_buffer_func(struct work_struct *work)
 {
-	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work_map_physical);
+	struct apple_asc_dcp *dcp = container_of(work, struct apple_asc_dcp, work_map_physical);
 	void *ptr = dcp->map_physical_buf;
 	struct {
 		struct apple_dcp_msg_header header;
@@ -855,7 +674,7 @@ static void apple_dcp_work_allocate_buffer_func(struct work_struct *work)
 			u32 mapid;
 		} __attribute__((packed)) out;
 	} __attribute__((packed)) *m = ptr;
-	struct apple_dcp_remote_buffer *rbuf = kzalloc(sizeof *rbuf, GFP_KERNEL);
+	struct apple_asc_dcp_remote_buffer *rbuf = kzalloc(sizeof *rbuf, GFP_KERNEL);
 	u64 size = m->in.size;
 	void *temp_buffer;
 	dma_addr_t dma_addr;
@@ -893,17 +712,17 @@ static void apple_dcp_work_allocate_buffer_func(struct work_struct *work)
 	mbox_copy_and_send(dcp->chan, &mbox);
 }
 
-
-static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
+#if 0
+static void apple_asc_dcp_work_hardware_boot_func(struct work_struct *work)
 {
-	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work_hardware_boot);
+	struct apple_asc_dcp *dcp = container_of(work, struct apple_asc_dcp, work_hardware_boot);
 	struct apple_dcp_mbox_msg *msg = kzalloc(1024*1024, GFP_KERNEL);
 	u32 data[2] = { 6, };
 	u32 update_notify_clients_dcp_data[] = {
 		0,0,0,0,0,0,1,1,1,0,1,1,1,
 	};
 	/* A407: swap_start(swapid, io_user_client) */
-	struct apple_dcp_io_user_client {
+	struct apple_asc_dcp_io_user_client {
 		struct {
 			u32 unk0;
 			u64 addr; /* an unhashed kernel VA, apparently? */
@@ -1000,21 +819,21 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->dcp.code = FOURCC("A357");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 0;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	msleep(1000);
 	/* A443: do_create_default_frame_buffer() */
 	msg->dcp.code = FOURCC("A443");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	msleep(1000);
 	/* A029: setup_video_limits() */
 	msg->dcp.code = FOURCC("A029");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 0;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	msleep(1000);
 	/* A463: flush_supportsPower(true) */
@@ -1025,7 +844,7 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->dcp_data[2] = 0;
 	msg->dcp_data[3] = 0;
 	msg->dcp.len_output = 0;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 	msg->dcp_data[0] = 0;
 	msleep(1000);
 
@@ -1034,7 +853,7 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->dcp.code = FOURCC("A000");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 #endif
 	
 
@@ -1042,7 +861,7 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->dcp.code = FOURCC("A460");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	msg->mbox.payload = 0x42;
 	mbox_copy_and_send(dcp->chan, &msg->mbox);
@@ -1057,37 +876,37 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->dcp.len_input = 8;
 	msg->dcp.len_output = 8;
 	memcpy(msg->dcp_data, data, sizeof(data));
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	/* A447: enable_disable_video_power_savings(0) */
 	msg->dcp.code = FOURCC("A447");
 	msg->dcp.len_input = 4;
 	msg->dcp.len_output = 4;
 	memset(msg->dcp_data, 0, 4);
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	/* A034: update_notify_clients_dcp([...]) */
 	msg->dcp.code = FOURCC("A034");
 	msg->dcp.len_input = 0x34;
 	msg->dcp.len_output = 0;
 	memcpy(msg->dcp_data, update_notify_clients_dcp_data, sizeof(update_notify_clients_dcp_data));
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	/* A454: first_client_open() */
 	msg->dcp.code = FOURCC("A454");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 0;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	msg->dcp.code = FOURCC("A469");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	msg->dcp.code = FOURCC("A411");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 
 	if (0){
 		/* A468: setPowerState(1, 0, 0) */
@@ -1095,7 +914,7 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 		msg->dcp.len_input = 12;
 		msg->dcp.len_output = 8;
 		memcpy(msg->dcp_data, powerstate_data, 12);
-		apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 	}
 
 	msleep(1000);
@@ -1105,7 +924,7 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 		msg->dcp.len_input = 12;
 		msg->dcp.len_output = 8;
 		memcpy(msg->dcp_data, powerstate_data, 12);
-		apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 	}
 
 	{
@@ -1115,7 +934,7 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 		msg->dcp.len_input = 8;
 		msg->dcp.len_output = 4;
 		memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
-		apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 	}
 
 #if 0
@@ -1123,102 +942,102 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->dcp.code = FOURCC("A000");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 #endif
 
 	init_buffer(dcp);
 	u32 delay = 2000;
 	while (1) {
-	msg->dcp.code = FOURCC("A407");
-	msg->dcp.len_input = sizeof(io_user_client.in);
-	msg->dcp.len_output = sizeof(io_user_client.out);
-	memcpy(msg->dcp_data, &io_user_client, sizeof(io_user_client));
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
-	memcpy(&io_user_client, msg->dcp_data, sizeof(io_user_client));
-	swapid = io_user_client.out.swapid;
-	printk("swapid 0x%x\n", swapid);
-	if (1) {
-		/* A412: setDigitalMode(0x59, 0x43) */
-		const u32 mode_args[] = { 0x59, 0x43 };
-		msg->dcp.code = FOURCC("A412");
-		msg->dcp.len_input = 8;
-		msg->dcp.len_output = 4;
-		memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
-		apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
-	}
-	msleep(delay); delay += 500;
-	printk("%zd == 80?\n", sizeof(struct apple_plane_info));
-	printk("total size: %d\n", (int)sizeof(struct apple_swap_submit_dcp));
-	printk("swaprec: %d == 800\n", (int)sizeof(struct apple_swaprec));
-	printk("surface: %d == 516\n", (int)sizeof(struct apple_surface));
-	swap_submit->swaprec.flags[0] = 0x861202;
-	swap_submit->swaprec.flags[2] = 0x04;
-	swap_submit->swaprec.swap_id = swapid;
-	swap_submit->swaprec.surf_ids[0] = surface_id;
-	swap_submit->swaprec.src_rect[0].width = 3840;
-	swap_submit->swaprec.src_rect[0].height = 2160;
+		msg->dcp.code = FOURCC("A407");
+		msg->dcp.len_input = sizeof(io_user_client.in);
+		msg->dcp.len_output = sizeof(io_user_client.out);
+		memcpy(msg->dcp_data, &io_user_client, sizeof(io_user_client));
+		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		memcpy(&io_user_client, msg->dcp_data, sizeof(io_user_client));
+		swapid = io_user_client.out.swapid;
+		printk("swapid 0x%x\n", swapid);
+		if (1) {
+			/* A412: setDigitalMode(0x59, 0x43) */
+			const u32 mode_args[] = { 0x59, 0x43 };
+			msg->dcp.code = FOURCC("A412");
+			msg->dcp.len_input = 8;
+			msg->dcp.len_output = 4;
+			memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
+			apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		}
+		msleep(delay); delay += 500;
+		printk("%zd == 80?\n", sizeof(struct apple_plane_info));
+		printk("total size: %d\n", (int)sizeof(struct apple_swap_submit_dcp));
+		printk("swaprec: %d == 800\n", (int)sizeof(struct apple_swaprec));
+		printk("surface: %d == 516\n", (int)sizeof(struct apple_surface));
+		swap_submit->swaprec.flags[0] = 0x861202;
+		swap_submit->swaprec.flags[2] = 0x04;
+		swap_submit->swaprec.swap_id = swapid;
+		swap_submit->swaprec.surf_ids[0] = surface_id;
+		swap_submit->swaprec.src_rect[0].width = 3840;
+		swap_submit->swaprec.src_rect[0].height = 2160;
 #if 0
-	swap_submit->swaprec.src_rect[1].width = 3840;
-	swap_submit->swaprec.src_rect[1].height = 2160;
-	swap_submit->swaprec.src_rect[2].width = 3840;
-	swap_submit->swaprec.src_rect[2].height = 2160;
-	swap_submit->swaprec.src_rect[3].width = 3840;
-	swap_submit->swaprec.src_rect[3].height = 2160;
+		swap_submit->swaprec.src_rect[1].width = 3840;
+		swap_submit->swaprec.src_rect[1].height = 2160;
+		swap_submit->swaprec.src_rect[2].width = 3840;
+		swap_submit->swaprec.src_rect[2].height = 2160;
+		swap_submit->swaprec.src_rect[3].width = 3840;
+		swap_submit->swaprec.src_rect[3].height = 2160;
 #endif
-	swap_submit->swaprec.surf_flags[0] = 1;
-	swap_submit->swaprec.dst_rect[0].width = 3840;
-	swap_submit->swaprec.dst_rect[0].height = 2160;
+		swap_submit->swaprec.surf_flags[0] = 1;
+		swap_submit->swaprec.dst_rect[0].width = 3840;
+		swap_submit->swaprec.dst_rect[0].height = 2160;
 #if 0
-	swap_submit->swaprec.dst_rect[1].width = 3840;
-	swap_submit->swaprec.dst_rect[1].height = 2160;
-	swap_submit->swaprec.dst_rect[2].width = 3840;
-	swap_submit->swaprec.dst_rect[2].height = 2160;
-	swap_submit->swaprec.dst_rect[3].width = 3840;
-	swap_submit->swaprec.dst_rect[3].height = 2160;
+		swap_submit->swaprec.dst_rect[1].width = 3840;
+		swap_submit->swaprec.dst_rect[1].height = 2160;
+		swap_submit->swaprec.dst_rect[2].width = 3840;
+		swap_submit->swaprec.dst_rect[2].height = 2160;
+		swap_submit->swaprec.dst_rect[3].width = 3840;
+		swap_submit->swaprec.dst_rect[3].height = 2160;
 #endif
-	swap_submit->swaprec.swap_enabled = 0x80000007;
-	swap_submit->swaprec.swap_completed = 0x80000007;
-	swap_submit->surf_addr[0] = 0xa0000000;
-	swap_submit->surfaces[0].format = 0x42475241;
-	swap_submit->surfaces[0].unk2[0] = 0x0d;
-	swap_submit->surfaces[0].unk2[1] = 0x01;
-	swap_submit->surfaces[0].stride = 3840 * 4;
-	swap_submit->surfaces[0].pix_size = 4;
-	swap_submit->surfaces[0].pel_w = 1;
-	swap_submit->surfaces[0].pel_h = 1;
-	swap_submit->surfaces[0].width = 3840;
-	swap_submit->surfaces[0].height = 2160;
-	swap_submit->surfaces[0].buf_size = 3840 * 2160 * 4;
-	swap_submit->surfaces[0].surface_id = surface_id;
-	swap_submit->surfaces[0].has_comp = 1;
-	swap_submit->surfaces[0].has_planes = 1;
-	//print_hex_dump(KERN_EMERG, "swaprec:", DUMP_PREFIX_OFFSET, 16, 1, swap_submit, sizeof(*swap_submit), true);
-	/* swap_submit_dcp */
-	/* A408: swap_submit_dcp(swap_rec, surfaces, surfaddr, false, .0, 0) */
-	msg->dcp.code = FOURCC("A408");
-	msg->dcp.len_input = 0xb64; // sizeof(swapid) + sizeof(swap_submit);
-	msg->dcp.len_output = 8;
-	memcpy(msg->dcp_data, swap_submit, sizeof(*swap_submit));
-	memset((void *)(&msg->dcp) + 0x475, 1, 1);
-	memset((void *)(&msg->dcp) + 0xb6b, 1, 3);
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
-	{
-		/* A412: setDigitalMode(0x59, 0x43) */
-		const u32 mode_args[] = { 0x59, 0x43 };
-		msg->dcp.code = FOURCC("A412");
-		msg->dcp.len_input = 8;
-		msg->dcp.len_output = 4;
-		memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
-		apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
-	}
-	msleep(30000);
+		swap_submit->swaprec.swap_enabled = 0x80000007;
+		swap_submit->swaprec.swap_completed = 0x80000007;
+		swap_submit->surf_addr[0] = 0xa0000000;
+		swap_submit->surfaces[0].format = 0x42475241;
+		swap_submit->surfaces[0].unk2[0] = 0x0d;
+		swap_submit->surfaces[0].unk2[1] = 0x01;
+		swap_submit->surfaces[0].stride = 3840 * 4;
+		swap_submit->surfaces[0].pix_size = 4;
+		swap_submit->surfaces[0].pel_w = 1;
+		swap_submit->surfaces[0].pel_h = 1;
+		swap_submit->surfaces[0].width = 3840;
+		swap_submit->surfaces[0].height = 2160;
+		swap_submit->surfaces[0].buf_size = 3840 * 2160 * 4;
+		swap_submit->surfaces[0].surface_id = surface_id;
+		swap_submit->surfaces[0].has_comp = 1;
+		swap_submit->surfaces[0].has_planes = 1;
+		//print_hex_dump(KERN_EMERG, "swaprec:", DUMP_PREFIX_OFFSET, 16, 1, swap_submit, sizeof(*swap_submit), true);
+		/* swap_submit_dcp */
+		/* A408: swap_submit_dcp(swap_rec, surfaces, surfaddr, false, .0, 0) */
+		msg->dcp.code = FOURCC("A408");
+		msg->dcp.len_input = 0xb64; // sizeof(swapid) + sizeof(swap_submit);
+		msg->dcp.len_output = 8;
+		memcpy(msg->dcp_data, swap_submit, sizeof(*swap_submit));
+		memset((void *)(&msg->dcp) + 0x475, 1, 1);
+		memset((void *)(&msg->dcp) + 0xb6b, 1, 3);
+		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		{
+			/* A412: setDigitalMode(0x59, 0x43) */
+			const u32 mode_args[] = { 0x59, 0x43 };
+			msg->dcp.code = FOURCC("A412");
+			msg->dcp.len_input = 8;
+			msg->dcp.len_output = 4;
+			memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
+			apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		}
+		msleep(30000);
 	}
 #if 0
 	/* A000: late_init_signal() */
 	msg->dcp.code = FOURCC("A000");
 	msg->dcp.len_input = 0;
 	msg->dcp.len_output = 4;
-	apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+	apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 #endif
 	if (0) {
 
@@ -1228,36 +1047,380 @@ static void apple_dcp_work_hardware_boot_func(struct work_struct *work)
 		msg->dcp.len_input = 8;
 		msg->dcp.len_output = 4;
 		memcpy(msg->dcp_data, mode_args, sizeof(mode_args));
-		apple_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
+		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 		msleep(10000);
 	}
 
 	dcp->reached_hardware_boot = 1;
 	return;
 }
+#endif
 
-static int apple_dcp_send_data(struct mbox_chan *chan, void *msg_header)
+static int stream_to_bufno(int stream)
 {
-	struct apple_dcp *dcp = chan->con_priv;
-	switch (chan - dcp->downstream_chans) {
+	switch (stream) {
 	case STREAM_COMMAND:
-		return apple_dcp_msg(chan, msg_header);
+	case STREAM_NESTED_COMMAND:
+		return BUF_COMMAND;
+	case STREAM_ASYNC:
+		return BUF_ASYNC;
+	case STREAM_CALLBACK:
+		return BUF_CALLBACK;
+	default:
+		BUG();
+	}
+	return 0;
+}
+
+static u64 stream_to_ack(int stream)
+{
+	switch (stream) {
+	case STREAM_COMMAND:
+		return 0x242;
+	case STREAM_NESTED_COMMAND:
+		return 0x42;
+	default:
+		BUG();
+	}
+}
+
+static u64 stream_to_command(int stream)
+{
+	switch (stream) {
+	case STREAM_COMMAND:
+		return 0x202;
+	case STREAM_NESTED_COMMAND:
+		return 0x2;
+	default:
+		BUG();
+	}
+}
+
+static int apple_asc_dcp_send_ack(struct apple_asc_dcp *dcp, int stream)
+{
+	static u64 stream_to_ack[N_STREAMS] = {
+		[STREAM_COMMAND] = 0x242,
+		[STREAM_NESTED_COMMAND] = 0x42,
+	};
+	struct apple_mbox_msg mbox;
+	mbox.payload = stream_to_ack[stream];
+	mbox.endpoint = dcp->endpoint;
+	mbox_copy_and_send(dcp->chan, &mbox);
+	return 0;
+}
+
+static size_t
+apple_asc_dcp_buf_alloc(struct apple_asc_dcp *dcp, int bufno, size_t size)
+{
+	unsigned long flags;
+	size_t ret = -1;
+	if (dcp->buf[bufno].off + size <= dcp->buf[bufno].size) {
+		ret = dcp->buf[bufno].off;
+		dcp->buf[bufno].off += size;
+	} else {
+		dev_warn(dcp->dev, "out of memory, this shouldn't happen!\n");
+	}
+	return ret;
+}
+
+/* Move the buffer pointer back to before the current message, unless
+ * a nested message interferes. In that case, wait for the nested
+ * message to be freed. */
+static void
+apple_asc_dcp_buf_free(struct apple_asc_dcp *dcp, struct apple_asc_dcp_shmem_msg *msg)
+{
+	int bufno = msg->bufno;
+	size_t off = msg->buf_off;
+	size_t size = msg->size_roundup;
+
+	if (msg->slow_free || dcp->buf[bufno].off != off + size) {
+		struct apple_asc_dcp_shmem_msg *msg;
+		list_for_each_entry(msg, &dcp->shmem_messages, list) {
+			if (msg->bufno == bufno && msg->buf_off > off) {
+				msg->slow_free = true;
+				return;
+			}
+		}
+
+		off = 0;
+		list_for_each_entry(msg, &dcp->shmem_messages, list) {
+			if (msg->bufno == bufno && msg->buf_off + msg->size_roundup > off) {
+				off = msg->buf_off + msg->size_roundup;
+				return;
+			}
+		}
+	}
+	dcp->buf[bufno].off = off;
+}
+
+static struct apple_asc_dcp_shmem_msg *
+apple_asc_dcp_find_shmem_msg(struct apple_asc_dcp *dcp, void *msg_header, int stream)
+{
+	struct apple_asc_dcp_shmem_msg *msg;
+	list_for_each_entry(msg, &dcp->shmem_messages, list) {
+		if (msg->msg == msg_header ||
+		    msg->buf_msg == msg_header)
+			return msg;
+		if (msg_header)
+			continue;
+		if (msg->stream == stream)
+			return msg;
+	}
+	return NULL;
+}
+
+static struct apple_asc_dcp_shmem_msg *
+apple_asc_dcp_shmem_msg_in(struct apple_asc_dcp *dcp, void *msg_header, int stream)
+{
+	int bufno = stream_to_bufno(stream);
+	size_t msg_size = apple_dcp_msg_size(msg_header);
+	struct apple_asc_dcp_shmem_msg *shmem_msg = kzalloc(sizeof(*shmem_msg),
+						       GFP_KERNEL);
+
+	if (!shmem_msg)
+		return NULL;
+
+	shmem_msg->stream = stream;
+	shmem_msg->bufno = bufno;
+
+	shmem_msg->size_raw = msg_size;
+	shmem_msg->size_roundup = 0;
+	shmem_msg->buf_msg = msg_header;
+	shmem_msg->msg = msg_header;
+	list_add(&shmem_msg->list, &dcp->shmem_messages);
+
+	return shmem_msg;
+}
+
+static struct apple_asc_dcp_shmem_msg *
+apple_asc_dcp_shmem_msg_out(struct apple_asc_dcp *dcp, void *msg_header, int stream)
+{
+	int bufno = stream_to_bufno(stream);
+	size_t msg_size = apple_dcp_msg_size(msg_header);
+	struct apple_asc_dcp_shmem_msg *shmem_msg = kzalloc(sizeof(*shmem_msg),
+						       GFP_KERNEL);
+
+	if (!shmem_msg)
+		return NULL;
+
+	shmem_msg->stream = stream;
+	shmem_msg->bufno = bufno;
+
+	shmem_msg->size_raw = msg_size;
+	shmem_msg->size_roundup = round_up(msg_size, 0x40);
+	shmem_msg->buf_off = apple_asc_dcp_buf_alloc(dcp, bufno,
+						 shmem_msg->size_roundup);
+	if (shmem_msg->buf_off == -1) {
+		kfree(shmem_msg);
+		return NULL;
+	}
+	shmem_msg->buf_msg = dcp->buf[bufno].base + shmem_msg->buf_off;
+	shmem_msg->msg = msg_header;
+
+	list_add(&shmem_msg->list, &dcp->shmem_messages);
+
+	return shmem_msg;
+}
+
+/* Receive data from a client, create a shmem wrapper, copy it to the
+ * shmem buf, and pass it on to upstream. */
+static int apple_asc_dcp_pingpong_initial(struct apple_asc_dcp *dcp, void *msg_header,
+				      int stream)
+{
+	int bufno = stream_to_bufno(stream);
+	size_t msg_size = apple_dcp_msg_size(msg_header);
+	struct apple_asc_dcp_shmem_msg* shmem_msg;
+	struct apple_mbox_msg mbox;
+	unsigned long flags;
+
+	shmem_msg = apple_asc_dcp_shmem_msg_out(dcp, msg_header, stream);
+	if (!shmem_msg) {
+		return -ENOMEM;
+	}
+
+	memcpy(shmem_msg->msg, msg_header, shmem_msg->size_raw);
+
+	mbox.payload = stream_to_command(stream);
+	mbox.payload |= (shmem_msg->buf_off << 16);
+	mbox.payload |= (shmem_msg->size_raw << 32);
+	mbox.endpoint = dcp->endpoint;
+	mbox_copy_and_send(dcp->chan, &mbox);
+
+	return 0;
+}
+
+/* Receive data from upstream, create a shmem wrapper, pass it on to
+ * the client mailbox. */
+static int apple_asc_dcp_pongping_initial(struct apple_asc_dcp *dcp, void *msg_header,
+				      int stream)
+{
+	int bufno = stream_to_bufno(stream);
+	size_t msg_size = apple_dcp_msg_size(msg_header);
+	struct apple_asc_dcp_shmem_msg *shmem_msg =
+		apple_asc_dcp_shmem_msg_in(dcp, msg_header, stream);
+	struct apple_mbox_msg mbox;
+	unsigned long flags;
+
+	shmem_msg = apple_asc_dcp_shmem_msg_in(dcp, msg_header, stream);
+
+	if (!shmem_msg) {
+		return -ENOMEM;
+	}
+
+	mbox_chan_received_data(&dcp->downstream_chans[stream], shmem_msg->msg);
+
+	return 0;
+}
+
+/* Receive response from upstream, copy it to the client memory area, pass it on to client */
+static int apple_asc_dcp_pingpong_response(struct apple_asc_dcp *dcp, void *msg_header,
+				       int stream)
+{
+	int bufno;
+	struct apple_asc_dcp_shmem_msg *shmem_msg =
+		apple_asc_dcp_find_shmem_msg(dcp, msg_header, stream);
+
+	switch (stream) {
+	case STREAM_COMMAND:
+	case STREAM_NESTED_COMMAND:
+		bufno = BUF_COMMAND;
+		break;
+
+	default:
+		BUG();
+	}
+	BUG_ON(!shmem_msg);
+	memcpy(shmem_msg->msg, shmem_msg->buf_msg, shmem_msg->size_raw);
+	list_del(&shmem_msg->list);
+	apple_asc_dcp_buf_free(dcp, shmem_msg);
+	mbox_chan_received_data(&dcp->downstream_chans[stream], shmem_msg->msg);
+	kfree(shmem_msg);
+
+	return 0;
+}
+
+/* Receive response from client, pass it on to upstream */
+static int apple_asc_dcp_pongping_response(struct apple_asc_dcp *dcp, void *msg_header,
+				       int stream)
+{
+	struct apple_asc_dcp_shmem_msg *shmem_msg =
+		apple_asc_dcp_find_shmem_msg(dcp, msg_header, stream);
+
+	BUG_ON(!shmem_msg);
+	apple_asc_dcp_send_ack(dcp, stream);
+
+	list_del(&shmem_msg->list);
+	kfree(shmem_msg);
+
+	BUG_ON(apple_asc_dcp_find_shmem_msg(dcp, msg_header, stream));
+
+	return 0;
+}
+
+static void apple_asc_dcp_receive_data(struct mbox_client *cl, void *mbox_msg)
+{
+	struct apple_asc_dcp *dcp = container_of(cl, struct apple_asc_dcp, cl);
+	struct apple_mbox_msg *msg = mbox_msg;
+	u64 payload = msg->payload;
+	unsigned type = payload & 0xF;
+	unsigned long flags;
+	bool ack = payload & BIT(6);
+	unsigned ctx = FIELD_GET(GENMASK(11,  8), payload);
+	unsigned off = FIELD_GET(GENMASK(31, 16), payload);
+	int stream;
+	int bufno;
+
+	spin_lock_irqsave(&dcp->lock, flags);
+	if (type == 1) {
+		complete_all(&dcp->buffer_complete);
+		spin_unlock_irqrestore(&dcp->lock, flags);
+		return;
+	}
+	if (!dcp->buf_va) {
+		dev_warn(dcp->dev, "ignoring early message!\n");
+		spin_unlock_irqrestore(&dcp->lock, flags);
+		return;
+	}
+
+	mdelay(200);
+	if (type != 2)
+		goto unexpected;
+	if (ack) {
+		switch (ctx) {
+		case 0:
+			stream = STREAM_NESTED_COMMAND;
+			bufno = BUF_COMMAND;
+			break;
+		case 2:
+			stream = STREAM_COMMAND;
+			bufno = BUF_COMMAND;
+			break;
+		default:
+			goto unexpected;
+		}
+
+		apple_asc_dcp_pingpong_response(dcp, NULL, stream);
+		BUG_ON(apple_asc_dcp_find_shmem_msg(dcp, NULL, stream));
+	} else {
+		void *buf_msg;
+		switch (ctx) {
+		case 0:
+			stream = STREAM_CALLBACK;
+			bufno = BUF_CALLBACK;
+			break;
+		case 3:
+			stream = STREAM_ASYNC;
+			bufno = BUF_ASYNC;
+			break;
+		default:
+			goto unexpected;
+		}
+		buf_msg = dcp->buf[bufno].base + off;
+
+		apple_asc_dcp_pongping_initial(dcp, buf_msg, stream);
+		BUG_ON(!apple_asc_dcp_find_shmem_msg(dcp, buf_msg, stream));
+	}
+	spin_unlock_irqrestore(&dcp->lock, flags);
+	return;
+
+unexpected:
+	spin_unlock_irqrestore(&dcp->lock, flags);
+	dev_warn(dcp->dev, "unexpected message %016llx\n",
+		 msg->payload);
+}
+
+static int apple_asc_dcp_mbox_send_data(struct mbox_chan *chan, void *msg_header)
+{
+	struct apple_asc_dcp *dcp = chan->con_priv;
+	int stream = chan - dcp->downstream_chans;
+
+	switch (stream) {
+	case STREAM_COMMAND:
+	case STREAM_NESTED_COMMAND:
+		return apple_asc_dcp_pingpong_initial(dcp, msg_header, stream);
+	case STREAM_CALLBACK:
+	case STREAM_ASYNC:
+		return apple_asc_dcp_pongping_response(dcp, msg_header, stream);
 	}
 	BUG_ON(1);
 }
 
-static struct mbox_chan_ops apple_dcp_mbox_chan_ops = {
-	.send_data = apple_dcp_send_data,
+static struct mbox_chan_ops apple_asc_dcp_mbox_chan_ops = {
+	.send_data = apple_asc_dcp_mbox_send_data,
 };
 
-static int apple_dcp_probe(struct platform_device *pdev)
+static int apple_asc_dcp_probe(struct platform_device *pdev)
 {
-	struct apple_dcp *dcp;
+	struct apple_asc_dcp *dcp;
 	int ret;
-	u32 endpoint;
+	u32 endpoint = 0x37;
 	int i;
+	unsigned long flags;
+	void *buf_va;
+	dma_addr_t iova;
+	struct apple_mbox_msg msg;
 
-	dcp = devm_kzalloc(&pdev->dev, sizeof *dcp, GFP_KERNEL);
+	dcp = devm_kzalloc(&pdev->dev, sizeof(*dcp), GFP_KERNEL);
 	if (!dcp)
 		return -ENOMEM;
 
@@ -1265,56 +1428,85 @@ static int apple_dcp_probe(struct platform_device *pdev)
 	dcp->buf_va_size = 0x200000;
 	dcp->rproc = platform_get_drvdata(to_platform_device(pdev->dev.parent));
 	dcp->cl.dev = dcp->dev;
-	dcp->cl.rx_callback = apple_dcp_receive_data;
-	dcp->cl.tx_done = apple_dcp_tx_done;
+	dcp->cl.rx_callback = apple_asc_dcp_receive_data;
+	dcp->cl.tx_done = apple_asc_dcp_tx_done;
 	dcp->cl.tx_tout = ASC_TIMEOUT_MSEC;
 
-	INIT_WORK(&dcp->work, apple_dcp_work_func);
+	spin_lock_init(&dcp->lock);
 	init_completion(&dcp->buffer_complete);
 	ret = of_property_read_u32_index(dcp->dev->of_node, "mboxes", 1,
 					 &endpoint);
-	/* XXX */
 	dcp->endpoint = endpoint;
 
 	dcp->chan = mbox_request_channel(&dcp->cl, 0);
-
 	if (IS_ERR(dcp->chan)) {
 		dev_err(dcp->dev, "couldn't acquire mailbox channel\n");
 		return PTR_ERR(dcp->chan);
 	}
 
 	INIT_LIST_HEAD(&dcp->rbufs);
+	INIT_LIST_HEAD(&dcp->shmem_messages);
 	for (i = 0; i < N_BUFFERS; i++)
 		INIT_LIST_HEAD(&dcp->buf[i].states);
 	for (i = 0; i < N_STREAMS; i++)
 		dcp->downstream_chans[i].con_priv = dcp;
 
 	dcp->mbox_controller.dev = dcp->dev;
-	dcp->mbox_controller.ops = &apple_dcp_mbox_chan_ops;
+	dcp->mbox_controller.ops = &apple_asc_dcp_mbox_chan_ops;
 	dcp->mbox_controller.chans = dcp->downstream_chans;
 	dcp->mbox_controller.num_chans = N_STREAMS;
 	dcp->mbox_controller.txdone_irq = true;
 
-	devm_mbox_controller_register(dcp->dev, &dcp->mbox_controller);
+	dma_set_mask_and_coherent(dcp->dev, DMA_BIT_MASK(32));
+	dcp->buf_va = dma_alloc_coherent(dcp->dev, dcp->buf_va_size,
+					 &iova, GFP_KERNEL);
 
-	schedule_work(&dcp->work);
+	printk("va %p\n", dcp->buf_va);
+	if (!dcp->buf_va)
+		return -ENOMEM;
+
+	memset (dcp->buf_va, 0, dcp->buf_va_size);
+	dcp->buf_va = buf_va;
+	dcp->buf_iova = iova;
+	dcp->buf[BUF_COMMAND].base = dcp->buf_va;
+	dcp->buf[BUF_COMMAND].size = 0x8000;
+	dcp->buf[BUF_COMMAND].off = 0;
+	dcp->buf[BUF_CALLBACK].base = dcp->buf_va + 0x60000;
+	dcp->buf[BUF_CALLBACK].size = 0x8000;
+	dcp->buf[BUF_CALLBACK].off = 0;
+	dcp->buf[BUF_ASYNC].base = dcp->buf_va + 0x40000;
+	dcp->buf[BUF_ASYNC].size = 0x20000;
+	dcp->buf[BUF_ASYNC].off = 0;
+	msg.payload = 0;
+	msg.endpoint = dcp->endpoint;
+
+	msg.payload |= 0x0040;
+	msg.payload |= iova << 16;
+	msg.payload |= 0xfLL << 48;
+
+	msleep(1000);
+	mbox_copy_and_send(dcp->chan, &msg);
+
+	wait_for_completion(&dcp->buffer_complete);
+
+	devm_mbox_controller_register(dcp->dev, &dcp->mbox_controller);
 
 	return 0;
 }
 
-static const struct of_device_id apple_dcp_of_match[] = {
+static const struct of_device_id apple_asc_dcp_of_match[] = {
 	{ .compatible = "apple,apple-asc-dcp" },
 	{ },
 };
 
-static struct platform_driver apple_dcp_platform_driver = {
+static struct platform_driver apple_asc_dcp_platform_driver = {
 	.driver = {
 		.name = "apple-asc-dcp",
-		.of_match_table = apple_dcp_of_match,
+		.of_match_table = apple_asc_dcp_of_match,
 	},
-	.probe = apple_dcp_probe,
+	.probe = apple_asc_dcp_probe,
 };
 
-module_platform_driver(apple_dcp_platform_driver);
+module_platform_driver(apple_asc_dcp_platform_driver);
 MODULE_DESCRIPTION("Apple SoC DCP Endpoint driver");
 MODULE_LICENSE("GPL v2");

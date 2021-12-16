@@ -583,7 +583,7 @@
 		        compatible = "apple,apple-asc";
 			reg = <0x2 0x31c00000 0 0x8000>;
 			rproc-name = "dcp";
-			iommus = <&dcp_dart 15>;
+			iommus = <&dcp_dart 0>;
 			mboxes = <&dcp_mbox 0>;
 			#mbox-cells = <1>;
 			endpoints = <0>;
@@ -618,13 +618,30 @@
 				rprocs = <&dcp_asc>;
 			};
 			dcp_asc_dcp: dcp_asc_dcp@37 {
-				compatible = "apple,apple-asc-dcp", "apple,apple-asc-system-endpoint";
+				compatible = "apple,apple-asc-dcp";
 				mboxes = <&dcp_asc 0x37>;
 				rprocs = <&dcp_asc>;
 				#mbox-cells = <1>; /* could be 0, but requires extra code */
 				iommus = <&dcp_dart 0>;
 			};
 		};
+
+		dcp: apple_dcp {
+			compatible = "apple,t8103-dcp";
+			mboxes = <&dcp_asc_dcp 0>, <&dcp_asc_dcp 1>, <&dcp_asc_dcp 2>, <&dcp_asc_dcp 3>;
+			iommus = <&dcp_dart 0>;
+
+			dcp_display: apple_dcp_display {
+				compatible = "apple,dcp-display";
+				iommus = <&disp_dart 4>;
+			};
+
+			dcp_fb: apple_dcp_fb {
+				compatible = "apple,dcp-framebuffer";
+				iommus = <&disp_dart 0>;
+			};
+		};
+
 
 		pcie0: pcie@690000000 {
 			compatible = "apple,t8103-pcie", "apple,pcie";

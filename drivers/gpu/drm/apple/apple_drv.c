@@ -43,11 +43,21 @@
 #define SURF_FRAMEBUFFER_0 0x54 /* start of framebuffer */
 #define SURF_FRAMEBUFFER_1 0x58 /* end of framebuffer ? */
 
+#define N_STREAMS		4
+#define STREAM_COMMAND		0 /* ping pong: receive msg, send modified msg */
+#define STREAM_CALLBACK		1 /* pong ping: send msg, receive modified msg */
+#define STREAM_ASYNC		2 /* pong ping */
+#define STREAM_NESTED_COMMAND	3 /* ping pong */
+
+struct apple_drm_private;
 struct apple_drm_private {
 	struct drm_device	drm;
 	bool			forced_to_4k;
-	struct mbox_client	cl;
-	struct mbox_chan *	dcp;
+	struct {
+		struct apple_drm_private *self;
+		struct mbox_client cl;
+		struct mbox_chan *dcp;
+	} stream[N_STREAMS];
 	struct kvbox		kvbox;
 	struct work_struct	work;
 	struct apple_dcp_mbox_msg *msg;
@@ -615,6 +625,9 @@ static struct drm_encoder_helper_funcs apple_encoder_helper_funcs = {
 	.dpms = apple_dpms,
 };
 
+extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
+					   struct device *dev);
+
 static int apple_platform_probe(struct platform_device *pdev)
 {
 	struct apple_drm_private *apple;
@@ -622,7 +635,7 @@ static int apple_platform_probe(struct platform_device *pdev)
 	struct drm_crtc *crtc;
 	struct drm_encoder *encoder;
 	struct drm_connector *connector;
-	int ret;
+	int ret, i;
 
 	apple = devm_drm_dev_alloc(&pdev->dev, &apple_drm_driver,
 				   struct apple_drm_private, drm);
@@ -648,17 +661,18 @@ static int apple_platform_probe(struct platform_device *pdev)
 				   GFP_KERNEL))
 		return -ENOMEM;
 
-	apple->cl.dev = &pdev->dev;
-	apple->dcp = mbox_request_channel(&apple->cl, 0);
-	if (IS_ERR(apple->dcp)) {
-		ret = PTR_ERR(apple->dcp);
-		goto err_unload;
+	for (i = 0; i < N_STREAMS; i++) {
+		apple->stream[i].self = apple;
+		apple->stream[i].cl.dev = &pdev->dev;
+		apple->stream[i].dcp = mbox_request_channel(&apple->stream[i].cl, i);
+		if (IS_ERR(apple->stream[i].dcp)) {
+			ret = PTR_ERR(apple->stream[i].dcp);
+			goto err_unload;
+		}
 	}
 
 	static int counter;
-	extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
-						   struct device *dev);
-	if (!apple_dcp_reached_hardware_boot(apple->dcp, apple->cl.dev))
+	if (!apple_dcp_reached_hardware_boot(apple->dcp[0], apple->cl.dev))
 		msleep(1000);
 	if (counter++ >= 0) {
 		printk("initializing...\n"); msleep(250);
@@ -666,9 +680,7 @@ static int apple_platform_probe(struct platform_device *pdev)
 		apple_fw_call(apple, FOURCC("A401"), NULL, 0, NULL, 4);
 		printk("initialized.\n"); msleep(250);
 	}
-	extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
-						   struct device *dev);
-	while (!apple_dcp_reached_hardware_boot(apple->dcp, apple->cl.dev))
+	while (!apple_dcp_reached_hardware_boot(apple->dcp[0], apple->cl.dev))
 		msleep(1000);
 	return -ENODEV;
 	msleep(3000);

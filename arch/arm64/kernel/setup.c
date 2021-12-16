@@ -205,6 +205,21 @@ struct apple_bootargs {
 	u64 mem_size_actual;
 };
 
+u64 framebuffer_physical_address;
+
+u64 get_fb_physical_address(void)
+{
+	printk("returning %016llx\n", framebuffer_physical_address);
+	return framebuffer_physical_address;
+}
+EXPORT_SYMBOL(get_fb_physical_address);
+
+void set_fb_physical_address(u64 addr)
+{
+	framebuffer_physical_address = addr;
+}
+EXPORT_SYMBOL(set_fb_physical_address);
+
 #ifdef CONFIG_BUILTIN_DEVICE_TREE_TEMPLATE
 static void __init fixup_fdt(u64 bootargs_phys, u64 base) __attribute__((__noinline__));
 static void __init fixup_fdt(u64 bootargs_phys, u64 base)
@@ -218,13 +233,17 @@ static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 	if (bootargs->framebuffer.height <= 1024 ||
 	    bootargs->framebuffer.width <= 1024)
 		framebuffer_enabled = false;
+	//framebuffer_enabled = false; /* testing with m1n1 */
 
 	if (!framebuffer_enabled) {
+#define FB_SIZE (32 << 20) /* enough for any red-blooded 4k screen */
 #define MEMTOP (0x800000000 + (bootargs->mem_size))
-		bootargs->framebuffer.phys_base = MEMTOP;
-		bootargs->framebuffer.height = 0;
-		bootargs->framebuffer.width = 0;
-		bootargs->framebuffer.stride = 0;
+		bootargs->framebuffer.phys_base = MEMTOP - FB_SIZE;
+		bootargs->mem_size -= FB_SIZE;
+		framebuffer_physical_address = bootargs->framebuffer.phys_base;
+		bootargs->framebuffer.height = 2160;
+		bootargs->framebuffer.width = 3840;
+		bootargs->framebuffer.stride = 3840*4;
 	}
 
 	FDT_INIT();

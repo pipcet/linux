@@ -487,6 +487,8 @@ static int simplefb_probe(struct platform_device *pdev)
 	info->fix.smem_start = mem->start;
 	info->fix.smem_len = resource_size(mem);
 	info->fix.line_length = params.stride;
+	extern void set_fb_physical_address(u64);
+	set_fb_physical_address(info->fix.smem_start);
 
 	info->var = simplefb_var;
 	info->var.xres = params.width;
