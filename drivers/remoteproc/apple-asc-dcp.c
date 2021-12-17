@@ -13,7 +13,7 @@
  * it connects to an ASC mailbox for endpoint 0x37; downstream, it
  * provides four ping-pong mailboxes: two of these mailboxes, when
  * given a message, will modify the message, then send it back. The
- * other two will send a message and expect the consumer to send it
+ * other two will send a message and expect the client to send it
  * back, modified.
  *
  * Here, message means the actual pointer: the original sender must
@@ -162,6 +162,22 @@ size_t apple_dcp_msg_size(struct apple_dcp_msg_header *msg)
 
 /* XXX prototype for debugging */
 static int apple_dcp_send_data(struct mbox_chan *chan, void *msg_header);
+
+static void apple_dcp_msg_print(struct apple_dcp_msg *msg)
+{
+	printk("message %c%c%c%c, %d/%d\n",
+	       (msg->header.code>>24) & 255,
+	       (msg->header.code>>16) & 255,
+	       (msg->header.code>>8) & 255,
+	       msg->header.code & 255,
+	       (int)msg->header.len_input,
+	       (int)msg->header.len_output);
+
+	print_hex_dump(KERN_EMERG, "H:", DUMP_PREFIX_OFFSET, 16, 1, msg->data-12, 12, true);
+	print_hex_dump(KERN_EMERG, "I:", DUMP_PREFIX_OFFSET, 16, 1, msg->data, msg->header.len_input, true);
+	print_hex_dump(KERN_EMERG, "O:", DUMP_PREFIX_OFFSET, 16, 1, msg->data + msg->header.len_input, msg->header.len_output, true);
+	//print_hex_dump(KERN_EMERG, "C:", DUMP_PREFIX_OFFSET, 16, 1, msg->data - 12, msg->header.len_input + msg->header.len_output + 12, true);
+}
 
 static void apple_asc_dcp_flush_func(struct work_struct *work)
 {
@@ -537,25 +553,18 @@ static void apple_asc_dcp_work_map_physical_func(struct work_struct *work)
 	static u64 static_address = 0x30000000;
 	struct apple_mbox_msg mbox;
 	/* map_physical */
-	printk("map_physical\n");
-	mdelay(100);
 	printk("dsmac %d\n",
 	       dma_set_mask_and_coherent(dcp->rproc->dev.parent,
 					 DMA_BIT_MASK(32)));
 	domain = iommu_domain_alloc(dcp->dev->bus);
 	mdelay(100);
-	printk("pa %016llx size %016llx\n",
-	       pa, size);
 	mdelay(100);
 	size = round_up(size, 16384);
 	temp_buffer = dma_alloc_noncoherent(dcp->rproc->dev.parent, size, &dma_addr,
 					    DMA_TO_DEVICE, GFP_KERNEL);
-	printk("temp_buffer %p dma_addr %016llx\n",
-	       temp_buffer, dma_addr);
 	mdelay(100);
 	dma_free_noncoherent(dcp->rproc->dev.parent, size, temp_buffer, dma_addr,
 			     DMA_TO_DEVICE);
-	printk("domain %p\n", domain);
 	mdelay(100);
 	iommu_attach_device(domain, dcp->rproc->dev.parent);
 	dma_addr = static_address;
@@ -566,16 +575,10 @@ static void apple_asc_dcp_work_map_physical_func(struct work_struct *work)
 	data[3] = 0;
 	data[4] = ++dcp->rbuf_id;
 	memcpy((u8*)ptr + off1, data, sizeof data);
-	if (0)
-	print_hex_dump(KERN_EMERG, "response:", DUMP_PREFIX_OFFSET,
-		       16, 1, ptr + 12 + in_len, out_len, true);
 	mdelay(100);
 	mbox.payload = 0x42;
 	mbox.endpoint = dcp->endpoint;
 	int bufno = BUF_CALLBACK;
-	if (dcp->buf[bufno].base && 0)
-		print_hex_dump(KERN_EMERG, "inbuf:", DUMP_PREFIX_OFFSET,
-			       16, 1, dcp->buf[bufno].base, 256, true);
 	mbox_copy_and_send(dcp->chan, &mbox);
 	static_address += size;
 }
@@ -625,7 +628,6 @@ static void apple_asc_dcp_work_map_buffer_func(struct work_struct *work)
 		return;
 	}
 	/* map_buffer */
-	printk("map_buffer\n");
 	m->out.vaddr = 0;
 	m->out.unk = 0;
 	mdelay(100);
@@ -692,7 +694,7 @@ static void apple_asc_dcp_work_allocate_buffer_func(struct work_struct *work)
 	rbuf->dva = dma_addr;
 	rbuf->size = size;
 	rbuf->va = temp_buffer;
-	m->out.paddr = 0; // virt_to_phys(temp_buffer);
+	m->out.paddr = 0;
 	m->out.mapid = rbuf->id;
 	m->out.dva = dma_addr;
 	m->out.dvasize = round_up(size, 16384);
@@ -1011,7 +1013,6 @@ static void apple_asc_dcp_work_hardware_boot_func(struct work_struct *work)
 		swap_submit->surfaces[0].surface_id = surface_id;
 		swap_submit->surfaces[0].has_comp = 1;
 		swap_submit->surfaces[0].has_planes = 1;
-		//print_hex_dump(KERN_EMERG, "swaprec:", DUMP_PREFIX_OFFSET, 16, 1, swap_submit, sizeof(*swap_submit), true);
 		/* swap_submit_dcp */
 		/* A408: swap_submit_dcp(swap_rec, surfaces, surfaddr, false, .0, 0) */
 		msg->dcp.code = FOURCC("A408");
@@ -1079,6 +1080,10 @@ static u64 stream_to_ack(int stream)
 		return 0x242;
 	case STREAM_NESTED_COMMAND:
 		return 0x42;
+	case STREAM_ASYNC:
+		return 0x342;
+	case STREAM_CALLBACK:
+		return 0x42;
 	default:
 		BUG();
 	}
@@ -1098,12 +1103,8 @@ static u64 stream_to_command(int stream)
 
 static int apple_asc_dcp_send_ack(struct apple_asc_dcp *dcp, int stream)
 {
-	static u64 stream_to_ack[N_STREAMS] = {
-		[STREAM_COMMAND] = 0x242,
-		[STREAM_NESTED_COMMAND] = 0x42,
-	};
 	struct apple_mbox_msg mbox;
-	mbox.payload = stream_to_ack[stream];
+	mbox.payload = stream_to_ack(stream);
 	mbox.endpoint = dcp->endpoint;
 	mbox_copy_and_send(dcp->chan, &mbox);
 	return 0;
@@ -1175,7 +1176,7 @@ apple_asc_dcp_shmem_msg_in(struct apple_asc_dcp *dcp, void *msg_header, int stre
 	int bufno = stream_to_bufno(stream);
 	size_t msg_size = apple_dcp_msg_size(msg_header);
 	struct apple_asc_dcp_shmem_msg *shmem_msg = kzalloc(sizeof(*shmem_msg),
-						       GFP_KERNEL);
+							    GFP_KERNEL);
 
 	if (!shmem_msg)
 		return NULL;
@@ -1209,11 +1210,12 @@ apple_asc_dcp_shmem_msg_out(struct apple_asc_dcp *dcp, void *msg_header, int str
 	shmem_msg->size_raw = msg_size;
 	shmem_msg->size_roundup = round_up(msg_size, 0x40);
 	shmem_msg->buf_off = apple_asc_dcp_buf_alloc(dcp, bufno,
-						 shmem_msg->size_roundup);
+						     shmem_msg->size_roundup);
 	if (shmem_msg->buf_off == -1) {
 		kfree(shmem_msg);
 		return NULL;
 	}
+	printk("bufno %d @ %p + %016llx\n", bufno, dcp->buf[bufno].base, shmem_msg->buf_off);
 	shmem_msg->buf_msg = dcp->buf[bufno].base + shmem_msg->buf_off;
 	shmem_msg->msg = msg_header;
 
@@ -1238,7 +1240,7 @@ static int apple_asc_dcp_pingpong_initial(struct apple_asc_dcp *dcp, void *msg_h
 		return -ENOMEM;
 	}
 
-	memcpy(shmem_msg->msg, msg_header, shmem_msg->size_raw);
+	memcpy(shmem_msg->buf_msg, msg_header, shmem_msg->size_raw);
 
 	mbox.payload = stream_to_command(stream);
 	mbox.payload |= (shmem_msg->buf_off << 16);
@@ -1252,14 +1254,10 @@ static int apple_asc_dcp_pingpong_initial(struct apple_asc_dcp *dcp, void *msg_h
 /* Receive data from upstream, create a shmem wrapper, pass it on to
  * the client mailbox. */
 static int apple_asc_dcp_pongping_initial(struct apple_asc_dcp *dcp, void *msg_header,
-				      int stream)
+					  int stream)
 {
-	int bufno = stream_to_bufno(stream);
-	size_t msg_size = apple_dcp_msg_size(msg_header);
-	struct apple_asc_dcp_shmem_msg *shmem_msg =
-		apple_asc_dcp_shmem_msg_in(dcp, msg_header, stream);
+	struct apple_asc_dcp_shmem_msg *shmem_msg;
 	struct apple_mbox_msg mbox;
-	unsigned long flags;
 
 	shmem_msg = apple_asc_dcp_shmem_msg_in(dcp, msg_header, stream);
 
@@ -1268,7 +1266,6 @@ static int apple_asc_dcp_pongping_initial(struct apple_asc_dcp *dcp, void *msg_h
 	}
 
 	mbox_chan_received_data(&dcp->downstream_chans[stream], shmem_msg->msg);
-
 	return 0;
 }
 
@@ -1306,6 +1303,10 @@ static int apple_asc_dcp_pongping_response(struct apple_asc_dcp *dcp, void *msg_
 	struct apple_asc_dcp_shmem_msg *shmem_msg =
 		apple_asc_dcp_find_shmem_msg(dcp, msg_header, stream);
 
+	if (memcmp(msg_header, "321D", 4) &&
+	    memcmp(msg_header, "565D", 4))
+		apple_dcp_msg_print(msg_header);
+
 	BUG_ON(!shmem_msg);
 	apple_asc_dcp_send_ack(dcp, stream);
 
@@ -1342,7 +1343,6 @@ static void apple_asc_dcp_receive_data(struct mbox_client *cl, void *mbox_msg)
 		return;
 	}
 
-	mdelay(200);
 	if (type != 2)
 		goto unexpected;
 	if (ack) {
@@ -1416,7 +1416,6 @@ static int apple_asc_dcp_probe(struct platform_device *pdev)
 	u32 endpoint = 0x37;
 	int i;
 	unsigned long flags;
-	void *buf_va;
 	dma_addr_t iova;
 	struct apple_mbox_msg msg;
 
@@ -1465,8 +1464,7 @@ static int apple_asc_dcp_probe(struct platform_device *pdev)
 	if (!dcp->buf_va)
 		return -ENOMEM;
 
-	memset (dcp->buf_va, 0, dcp->buf_va_size);
-	dcp->buf_va = buf_va;
+	memset(dcp->buf_va, 0, dcp->buf_va_size);
 	dcp->buf_iova = iova;
 	dcp->buf[BUF_COMMAND].base = dcp->buf_va;
 	dcp->buf[BUF_COMMAND].size = 0x8000;
@@ -1490,6 +1488,8 @@ static int apple_asc_dcp_probe(struct platform_device *pdev)
 	wait_for_completion(&dcp->buffer_complete);
 
 	devm_mbox_controller_register(dcp->dev, &dcp->mbox_controller);
+
+	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 
 	return 0;
 }

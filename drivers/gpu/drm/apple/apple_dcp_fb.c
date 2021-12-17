@@ -93,16 +93,6 @@ static int apple_dcp_fb_probe(struct platform_device *pdev)
 	apple->dev = &pdev->dev;
 	apple->dcp = platform_get_drvdata(to_platform_device(pdev->dev.parent));
 
-	ret = dma_set_mask_and_coherent(apple->dev, DMA_BIT_MASK(32));
-	if (ret)
-		return ret;
-
-	apple->fb = dma_alloc_noncoherent(apple->dev, 4096 * 2048 * 4,
-					  &apple->dva, DMA_TO_DEVICE,
-					  GFP_KERNEL);
-
-	if (!apple->fb)
-		return -ENOMEM;
 	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 
 	apple_dcp_set_fb(apple->dcp, &pdev->dev);

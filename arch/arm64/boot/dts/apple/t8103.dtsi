@@ -623,22 +623,23 @@
 				rprocs = <&dcp_asc>;
 				#mbox-cells = <1>; /* could be 0, but requires extra code */
 				iommus = <&dcp_dart 0>;
-			};
-		};
+				dcp: apple_dcp {
+					compatible = "apple,t8103-dcp";
+					mboxes = <&dcp_asc_dcp 0>, <&dcp_asc_dcp 1>, <&dcp_asc_dcp 2>, <&dcp_asc_dcp 3>;
+					iommus = <&dcp_dart 0>;
+					dart-sid = <0>;
+					dcp_display: apple_dcp_display {
+						compatible = "apple,dcp-display";
+						iommus = <&disp_dart 4>;
+						dart-sid = <4>;
+					};
+					dcp_fb: apple_dcp_fb {
+						compatible = "apple,dcp-framebuffer";
+						iommus = <&disp_dart 0>;
+						dart-sid = <0>;
+					};
+				};
 
-		dcp: apple_dcp {
-			compatible = "apple,t8103-dcp";
-			mboxes = <&dcp_asc_dcp 0>, <&dcp_asc_dcp 1>, <&dcp_asc_dcp 2>, <&dcp_asc_dcp 3>;
-			iommus = <&dcp_dart 0>;
-
-			dcp_display: apple_dcp_display {
-				compatible = "apple,dcp-display";
-				iommus = <&disp_dart 4>;
-			};
-
-			dcp_fb: apple_dcp_fb {
-				compatible = "apple,dcp-framebuffer";
-				iommus = <&disp_dart 0>;
 			};
 		};
 

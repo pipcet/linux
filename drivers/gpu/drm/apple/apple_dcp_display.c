@@ -91,10 +91,6 @@ static int apple_dcp_display_probe(struct platform_device *pdev)
 	apple->dev = &pdev->dev;
 	apple->dcp = platform_get_drvdata(to_platform_device(pdev->dev.parent));
 
-	ret = dma_set_mask_and_coherent(apple->dev, DMA_BIT_MASK(32));
-	if (ret)
-		return ret;
-
 	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 
 	apple_dcp_set_display(apple->dcp, &pdev->dev);

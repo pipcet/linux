@@ -84,6 +84,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/iommu.h>
 #include <linux/kvbox.h>
+#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/of_device.h>
@@ -135,28 +136,33 @@ struct apple_dcp_rbuf {
 
 struct list_msg {
 	struct list_head list;
+	int stream;
 	struct apple_dcp_msg *msg;
 };
 
 struct apple_dcp {
-	struct drm_device	drm;
-	struct mutex		mutex;
-	bool			forced_to_4k;
+	struct drm_device drm;
+	struct device *dev;
+	struct mutex mutex;
+	bool forced_to_4k;
 	struct apple_drm_stream stream[N_STREAMS];
-	struct kvbox		kvbox;
-	struct work_struct	work;
-	struct work_struct	work_callback;
+	struct kvbox kvbox;
+	struct work_struct work;
+	struct work_struct work_callback;
 	struct apple_dcp_mbox_msg *msg;
-	spinlock_t		lock;
-	bool			write;
-	struct kvbox_prop *	prop;
-	void __iomem		*regs;
-	dma_addr_t		dummy_buffer;
+	spinlock_t lock;
+	bool write;
+	struct kvbox_prop *prop;
+	void __iomem *regs;
+	dma_addr_t dummy_buffer;
 
-	u32			rbuf_id;
-	struct list_head        rbufs;
-	struct list_head        callback_messages;
-	u32 *			regdump;
+	dma_addr_t dva_display;
+	dma_addr_t dva_framebuffer;
+
+	u32 rbuf_id;
+	struct list_head rbufs;
+	struct list_head callback_messages;
+	u32 *regdump;
 	struct backlight_device *backlight;
 
 	struct device *display;
@@ -179,30 +185,99 @@ static void callback_clock_frequency(struct apple_dcp *dcp, struct apple_dcp_msg
 {
 	u32 out[] = { 533333328 };
 	callback_return_zero(dcp, msg);
-	memcpy(msg->data, &out, sizeof(out));
+	memcpy(msg->data, out, sizeof(out));
 }
 
 static void callback_bandwidth_setup(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
 {
 	u32 out[] = { 0, 0, 0x3b738014, 0x2, 0x3bc3c000, 0x2, 0, 2 };
 	callback_return_zero(dcp, msg);
-	memcpy(msg->data, &out, sizeof(out));
+	memcpy(msg->data, out, sizeof(out));
 }
 
 static void callback_device_memory(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
 {
 	u32 out[] = { 0x3b3d0000, 2, 0x4000, 0 };
 	callback_return_zero(dcp, msg);
-	memcpy(msg->data, &out, sizeof(out));
+	memcpy(msg->data, out, sizeof(out));
+}
+
+static u64 apple_get_fb_dva(struct apple_dcp *dcp)
+{
+	struct device *dev = dcp->fb;
+	static dma_addr_t dma_addr;
+	void *va;
+	int i;
+
+	BUG_ON(!dcp->fb);
+
+	if (!dma_addr) {
+		dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+		va = dma_alloc_coherent(dev, 32<<20, &dma_addr, GFP_KERNEL);
+		for (i = 0; i < (32<<18); i++) {
+			char *p = va + 4 * i;
+			p[0] = p[1] = p[2] = p[3] = i;
+		}
+		struct iommu_domain *domain = iommu_get_domain_for_dev(dcp->display);
+		iommu_attach_device(domain, dcp->display);
+		printk("iommu_map[fb]: %016llx\n", (long long)iommu_map(domain, 0xa0000000, virt_to_phys(va), (32<<20), IOMMU_READ|IOMMU_WRITE));
+		dma_addr = 0xa0000000;
+		*(u64 *)phys_to_virt(0x9fff78280) =
+			*(u64 *)phys_to_virt(0x9fff48280);
+	}
+	return dma_addr;
 }
 
 static void callback_map_buffer(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
 {
+	struct apple_dcp_msg_map_buffer {
+		struct apple_dcp_msg_header header;
+		struct {
+			u32 rbuf_id;
+			u64 unk;
+		} __attribute__((packed)) in;
+		struct {
+			u64 va;
+			u64 dva;
+			u32 unk;
+		} __attribute__((packed)) out;
+	} __attribute__((packed)) *m =
+		container_of(&msg->header, struct apple_dcp_msg_map_buffer,
+			     header);
+	struct apple_dcp_rbuf *rbuf;
+	void *va;
+	struct iommu_domain *domain;
+
+	BUG_ON(!dcp->display);
+
+	domain = iommu_get_domain_for_dev(dcp->display);
+	list_for_each_entry(rbuf, &dcp->rbufs, list) {
+		if (rbuf->id == m->in.rbuf_id)
+			break;
+	}
+	if (list_entry_is_head(rbuf, &dcp->rbufs, list)) {
+		dev_err(dcp->dev, "rbuf not found!\n");
+		return;
+	}
+
+	m->out.va = 0;
+	m->out.unk = 0;
+	rbuf->dva = dcp->dva_display;
+	iommu_attach_device(domain, dcp->display);
+	dma_set_mask_and_coherent(dcp->display, DMA_BIT_MASK(32));
+	for (va = rbuf->va; va < rbuf->va + rbuf->size; va += 16384) {
+		printk("iommu_map[mb]: %016llx\n", (long long)iommu_map(domain, rbuf->dva + (va - rbuf->va),
+								    virt_to_phys(va), 16384, IOMMU_READ|IOMMU_WRITE));
+	}
+	m->out.dva = rbuf->dva;
+	dcp->dva_display += rbuf->size;
+	printk("map_buffer mapped %016llx to %016llx\n",
+	       (long long)virt_to_phys(rbuf->va), (long long)rbuf->dva);
 }
 
 static void callback_allocate_buffer(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
 {
-	struct apple_dcp_msg_map_physical {
+	struct apple_dcp_msg_allocate_buffer {
 		struct apple_dcp_msg_header header;
 		struct {
 			u32 unk0;
@@ -217,14 +292,15 @@ static void callback_allocate_buffer(struct apple_dcp *dcp, struct apple_dcp_msg
 		} __attribute__((packed)) out;
 	} __attribute__((packed)) *m = (void *)msg;
 	dma_addr_t dma_addr;
-	struct apple_dcp_rbuf *rbuf = devm_kzalloc(dcp->drm.dev, sizeof *rbuf,
+	struct apple_dcp_rbuf *rbuf = devm_kzalloc(dcp->dev, sizeof *rbuf,
 						   GFP_KERNEL);
-	void *va = dma_alloc_coherent(dcp->drm.dev, m->in.size,
+	void *va = dma_alloc_coherent(dcp->dev, m->in.size,
 				      &dma_addr, GFP_KERNEL);
 	if (!rbuf || !va) {
-		dev_err(dcp->drm.dev, "allocation failed!\n");
+		dev_err(dcp->dev, "allocation failed!\n");
 		return;
 	}
+	printk("allocated buffer at %016llx\n", dma_addr);
 	/* we don't allocate a physically contiguous buffer,
 	 * necessarily, and why would a device behind an IOMMU care
 	 * about a physical address in the first place? */
@@ -241,7 +317,7 @@ static void callback_allocate_buffer(struct apple_dcp *dcp, struct apple_dcp_msg
 
 static void callback_map_physical(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
 {
-	struct iommu_domain *domain = iommu_domain_alloc(dcp->drm.dev->bus);
+	struct iommu_domain *domain = iommu_get_domain_for_dev(dcp->dev);
 	struct apple_dcp_msg_map_physical {
 		struct apple_dcp_msg_header header;
 		struct {
@@ -257,7 +333,8 @@ static void callback_map_physical(struct apple_dcp *dcp, struct apple_dcp_msg *m
 		} __attribute__((packed)) out;
 	} __attribute__((packed)) *m = (void *)msg;
 	dma_addr_t dma_addr = 0xc0000000;
-	iommu_map(domain, dma_addr, m->in.pa, m->in.size, IOMMU_READ|IOMMU_WRITE);
+	iommu_attach_device(domain, dcp->dev);
+	printk("iommu_map[mp]: %016llx\n", (long long)iommu_map(domain, dma_addr, m->in.pa, m->in.size, IOMMU_READ|IOMMU_WRITE));
 	m->out.dva = dma_addr;
 	m->out.size = m->in.size;
 	m->out.mapid = ++dcp->rbuf_id;
@@ -274,39 +351,43 @@ struct apple_dcp_callback {
 	void (*callback)(struct apple_dcp *dcp, struct apple_dcp_msg *msg);
 };
 
+#define callback_nop callback_return_zero
+
 static struct apple_dcp_callback apple_dcp_callbacks[] = {
 	{ FOURCC("D000"), callback_return_one },
 	{ FOURCC("D001"), callback_return_one },
+	{ FOURCC("D003"), callback_bandwidth_setup },
+	{ FOURCC("D101"), callback_return_zero },
 	{ FOURCC("D107"), callback_return_one },
 	{ FOURCC("D108"), callback_return_one },
 	{ FOURCC("D109"), callback_return_one },
 	{ FOURCC("D110"), callback_return_one },
+	{ FOURCC("D111"), callback_return_zero },
+	{ FOURCC("D116"), callback_return_one },
+	{ FOURCC("D118"), callback_return_zero },
+	{ FOURCC("D120"), callback_edt_data },
 	{ FOURCC("D122"), callback_return_one },
 	{ FOURCC("D123"), callback_return_one },
 	{ FOURCC("D124"), callback_return_one },
+	{ FOURCC("D201"), callback_map_buffer },
 	{ FOURCC("D206"), callback_return_one },
 	{ FOURCC("D207"), callback_return_one },
+	{ FOURCC("D300"), callback_nop },
+	{ FOURCC("D401"), callback_return_zero },
+	{ FOURCC("D408"), callback_clock_frequency },
+	{ FOURCC("D411"), callback_device_memory },
 	{ FOURCC("D413"), callback_return_one },
 	{ FOURCC("D414"), callback_return_one },
 	{ FOURCC("D415"), callback_return_one },
+	{ FOURCC("D451"), callback_allocate_buffer },
+	{ FOURCC("D452"), callback_map_physical },
 	{ FOURCC("D552"), callback_return_one },
 	{ FOURCC("D561"), callback_return_one },
 	{ FOURCC("D563"), callback_return_one },
 	{ FOURCC("D565"), callback_return_one },
 	{ FOURCC("D567"), callback_return_one },
-	{ FOURCC("D101"), callback_return_zero },
-	{ FOURCC("D111"), callback_return_zero },
-	{ FOURCC("D118"), callback_return_zero },
 	{ FOURCC("D574"), callback_return_zero },
-	{ FOURCC("D401"), callback_return_zero },
-	{ FOURCC("D120"), callback_edt_data },
-	{ FOURCC("D411"), callback_device_memory },
-	{ FOURCC("D201"), callback_map_buffer },
-	{ FOURCC("D451"), callback_allocate_buffer },
-	{ FOURCC("D452"), callback_map_physical },
-	{ FOURCC("D003"), callback_bandwidth_setup },
-	{ FOURCC("D116"), callback_return_one },
-	{ FOURCC("D408"), callback_clock_frequency },
+	{ FOURCC("D598"), callback_return_zero },
 };
 
 static struct apple_dcp *apple_dcp;
@@ -320,9 +401,6 @@ static void apple_dcp_init_maybe(struct apple_dcp *dcp)
 	if (!dcp->display)
 		return;
 
-	printk("initing!\n");
-
-	msleep(1000);
 	apple_dcp_init(dcp);
 }
 
@@ -363,19 +441,19 @@ static int apple_match_backlight(struct device *dev, void *ptr)
 static void apple_find_backlight(struct apple_dcp *apple)
 {
 	if (!apple->backlight) {
-		apple->backlight = of_find_backlight_by_node(apple->drm.dev->of_node);
+		apple->backlight = of_find_backlight_by_node(apple->dev->of_node);
 		if (IS_ERR(apple->backlight))
 			apple->backlight = NULL;
 	}
 
 	if (!apple->backlight) {
-		apple->backlight = devm_of_find_backlight(apple->drm.dev);
+		apple->backlight = devm_of_find_backlight(apple->dev);
 		if (IS_ERR(apple->backlight))
 			apple->backlight = NULL;
 	}
 
 	if (!apple->backlight) {
-		device_for_each_child(apple->drm.dev, apple, apple_match_backlight);
+		device_for_each_child(apple->dev, apple, apple_match_backlight);
 	}
 }
 
@@ -393,7 +471,7 @@ static int apple_regdump_create(struct apple_dcp *apple)
 	if (apple->regdump)
 		return -EBUSY;
 
-	apple->regdump = devm_kzalloc(apple->drm.dev, 0x40000, GFP_KERNEL);
+	apple->regdump = devm_kzalloc(apple->dev, 0x40000, GFP_KERNEL);
 	if (!apple->regdump)
 		return -ENOMEM;
 
@@ -429,7 +507,7 @@ static int apple_regdump_replay(struct apple_dcp *apple)
 			writel(apple->regdump[idx/4],
 			       apple->regs + idx);
 
-	devm_kfree(apple->drm.dev, apple->regdump);
+	devm_kfree(apple->dev, apple->regdump);
 
 	return 0;
 }
@@ -441,17 +519,11 @@ static int apple_fw_call(struct apple_dcp *apple,
 	struct apple_dcp_msg *msg = container_of(header, struct apple_dcp_msg, header);
 	int ret = 0;
 
-	printk("%d\n", __LINE__); mdelay(1000);
 	mutex_lock(&apple->mutex);
-	printk("%d\n", __LINE__); mdelay(1000);
 	reinit_completion(&apple->stream[stream].complete);
-	printk("%d %p %d\n", __LINE__, apple->stream[stream].dcp, stream); mdelay(1000);
 	mbox_send_message(apple->stream[stream].dcp, msg);
-	printk("%d\n", __LINE__); mdelay(1000);
 	wait_for_completion(&apple->stream[stream].complete);
-	printk("%d\n", __LINE__); mdelay(1000);
 	mutex_unlock(&apple->mutex);
-	printk("%d\n", __LINE__); mdelay(1000);
 
 	return ret;
 }
@@ -465,9 +537,10 @@ static void apple_dcp_single_callback(struct apple_dcp *dcp, struct apple_dcp_ms
 			callback->callback(dcp, msg);
 			return;
 		}
+		callback++;
 	}
 
-	dev_err(dcp->drm.dev, "callback not found!\n");
+	dev_err(dcp->dev, "callback not found!\n");
 }
 
 static void apple_dcp_work_func(struct work_struct *work)
@@ -479,8 +552,11 @@ static void apple_dcp_work_func(struct work_struct *work)
 			list_first_entry(&dcp->callback_messages,
 					 struct list_msg, list);
 		struct apple_dcp_msg *msg = list_msg->msg;
-		apple_dcp_single_callback(dcp, msg);
+		int stream = list_msg->stream;
 		list_del(&list_msg->list);
+		apple_dcp_single_callback(dcp, msg);
+		mbox_send_message(dcp->stream[stream].dcp, msg);
+		devm_kfree(dcp->dev, list_msg);
 	}
 }
 
@@ -577,7 +653,7 @@ static void apple_plane_atomic_disable(struct drm_plane *plane,
 {
 	struct apple_dcp *apple = to_apple_dcp(plane->dev);
 	dma_addr_t dva = apple->dummy_buffer;
-	dev_info(apple->drm.dev, "disable: mapping dummy buffer\n");
+	dev_info(apple->dev, "disable: mapping dummy buffer\n");
 
 	writel(dva, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_0);
 	writel(dva + 3840 * 2160 * 4, apple->regs + DISP0_SURF0 + SURF_FRAMEBUFFER_1);
@@ -596,7 +672,7 @@ static void apple_plane_atomic_update(struct drm_plane *plane,
 	fb = plane_state->fb;
 	dva = drm_fb_cma_get_gem_addr(fb, plane_state, 0);
 	if (dva == 0) {
-		dev_info(apple->drm.dev, "update: mapping dummy buffer\n");
+		dev_info(apple->dev, "update: mapping dummy buffer\n");
 		dva = apple->dummy_buffer;
 	}
 
@@ -822,7 +898,6 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg)
 	struct apple_drm_stream *stream = container_of(cl, struct apple_drm_stream, cl);
 	struct apple_dcp *apple = stream->self;
 	int streamno = stream - apple->stream;
-	unsigned long flags;
 
 	switch (streamno) {
 	case STREAM_COMMAND:
@@ -832,15 +907,16 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg)
 
 	case STREAM_ASYNC:
 	case STREAM_CALLBACK:
-		printk("callback: %s\n", msg + 12);
-		spin_lock_irqsave(&apple->lock, flags);
-		struct list_msg *list_msg = devm_kzalloc(apple->drm.dev, sizeof(*list_msg), GFP_KERNEL);
+	{
+		struct list_msg *list_msg = devm_kzalloc(apple->dev, sizeof(*list_msg), GFP_KERNEL);
+		char *str = msg;
+		printk("callback: %c%c%c%c\n", str[3], str[2], str[1], str[0]);
 		list_msg->msg = msg;
+		list_msg->stream = streamno;
 		list_add(&list_msg->list, &apple->callback_messages);
-		INIT_WORK(&apple->work_callback, apple_dcp_work_func);
 		schedule_work(&apple->work_callback);
-		spin_unlock_irqrestore(&apple->lock, flags);
 		break;
+	}
 	}
 }
 
@@ -867,30 +943,122 @@ struct apple_dcp_msg_int_void {
 	u32 in;
 	struct {} __attribute__((packed)) out;
 } __attribute__((packed));
+
+struct apple_dcp_msg_set_power_state {
+	struct apple_dcp_msg_header header;
+	u32 in[3];
+	u32 out[2];
+} __attribute__((packed));
+
 struct apple_dcp_msg_color_remap_mode {
 	struct apple_dcp_msg_header header;
 	u32 in[3];
 	u32 out[2];
 } __attribute__((packed));
+
 struct apple_dcp_msg_update_notify_clients {
 	struct apple_dcp_msg_header header;
 	u32 in[13];
 	u32 out[2];
 } __attribute__((packed));
+
 struct apple_dcp_msg_begin_swap {
 	struct apple_dcp_msg_header header;
-	u32 in[13];
-	u32 out[2];
+	struct {
+		u32 unk0;
+		u64 addr; /* an unhashed kernel VA, apparently */
+		u64 flags;
+		u32 unk1;
+	} __attribute__((packed)) in;
+	struct {
+		u32 swap_id;
+		u32 unk0;
+		u64 unk1[2];
+	} __attribute__((packed)) out;
 } __attribute__((packed));
+
+struct apple_dcp_msg_swap_rect {
+	u32 x, y, width, height;
+} __attribute__((packed));
+
+struct apple_dcp_msg_plane_info {
+	u32 width;
+	u32 height;
+	u32 base;
+	u32 offset;
+	u32 stride;
+	u32 size;
+	u16 tile_size;
+	u8 tile_width;
+	u8 tile_height;
+	u8 unk[0xd];
+	u8 unk2;
+	u8 unk3[0x26];
+} __attribute__((packed));
+
+struct apple_dcp_msg_swaprec {
+	u32 unk_mbz0[16];
+	u32 flags[4];
+	u32 swap_id;
+	u32 surf_ids[4];
+	struct apple_dcp_msg_swap_rect src_rect[4];
+	u32 surf_flags[4];
+	u32 surf_unk[4];
+	struct apple_dcp_msg_swap_rect dst_rect[4];
+	u32 swap_enabled;
+	u32 swap_completed;
+	u32 unk_mbz1[(0x1b8 + 0x14 + 0x3c + 12)/4];
+} __attribute__((packed));
+
+#define MAX_PLANES 3
+
+struct apple_dcp_msg_swapsurf {
+	u8 is_tiled;
+	u8 unk0[2];
+	u32 plane_cnt[2];
+	u32 format;
+	u32 unk1;
+	u8 unk2[2];
+	u32 stride;
+	u16 pix_size;
+	u8 pel_w;
+	u8 pel_h;
+	u32 offset;
+	u32 width;
+	u32 height;
+	u32 buf_size;
+	u32 unk5[2];
+	u32 surface_id;
+	u8 comp_types[MAX_PLANES * 8];
+	u64 has_comp;
+	struct apple_dcp_msg_plane_info planes[MAX_PLANES];
+	u64 has_planes;
+	u8 compression_info[MAX_PLANES * 0x34];
+	u64 has_compression_info;
+	u32 unk3[2];
+	u8 unk4[7];
+} __attribute__((packed));
+
 struct apple_dcp_msg_start_swap {
 	struct apple_dcp_msg_header header;
-	u32 in[13];
-	u32 out[2];
+	struct {
+		struct apple_dcp_msg_swaprec swaprec;
+		struct apple_dcp_msg_swapsurf surface[4];
+		u64 surf_addr[4];
+		u8 unk_bool;
+		u64 unk_float;
+		u32 unk_int;
+		u32 unk_flags;
+	} __attribute__((packed)) in;
+	struct {
+		u64 unk;
+	} __attribute__((packed)) out;
 } __attribute__((packed));
+
 struct apple_dcp_msg_set_digital_mode {
 	struct apple_dcp_msg_header header;
-	u32 in[13];
-	u32 out[2];
+	u32 in[3];
+	u32 out[1];
 } __attribute__((packed));
 
 #define INIT_APPLE_DCP_MSG(ptr, code_str)  do {			\
@@ -903,15 +1071,17 @@ static int apple_dcp_init(struct apple_dcp *apple)
 {
 	struct apple_dcp_msg_init a401 = {};
 	struct apple_dcp_msg_void a357 = {};
+	struct apple_dcp_msg_void_int a000 = {};
 	struct apple_dcp_msg_void_int a443 = {};
 	struct apple_dcp_msg_void a029 = {};
 	struct apple_dcp_msg_int_void a463 = {
 		.in = 1,
 	};
 	struct apple_dcp_msg_void_int a460 = {};
-	struct apple_dcp_msg_color_remap_mode a447 = {
+	struct apple_dcp_msg_color_remap_mode a426 = {
 		.in = { 6, },
 	};
+	struct apple_dcp_msg_color_remap_mode a447 = {};
 	struct apple_dcp_msg_update_notify_clients a034 = {
 		.in = { 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, }
 	};
@@ -921,58 +1091,103 @@ static int apple_dcp_init(struct apple_dcp *apple)
 	struct apple_dcp_msg_set_digital_mode a412 = {
 		.in = { 0x59, 0x43, },
 	};
+	struct apple_dcp_msg_set_power_state a468 = {
+		.in = { 1, },
+	};
 
 	struct apple_dcp_msg_begin_swap *a407 = kzalloc(sizeof *a407, GFP_KERNEL);
 	struct apple_dcp_msg_start_swap *a408 = kzalloc(sizeof *a408, GFP_KERNEL);
 	int delay = 2000;
-	INIT_APPLE_DCP_MSG(&a401, "A401");
-	INIT_APPLE_DCP_MSG(&a357, "A357");
-	INIT_APPLE_DCP_MSG(&a443, "A443");
+	u32 surface_id = 3; /* this works... */
+
+	INIT_APPLE_DCP_MSG(&a000, "A000");
 	INIT_APPLE_DCP_MSG(&a029, "A029");
-	INIT_APPLE_DCP_MSG(&a463, "A463");
-	INIT_APPLE_DCP_MSG(&a460, "A460");
-	INIT_APPLE_DCP_MSG(&a447, "A447");
 	INIT_APPLE_DCP_MSG(&a034, "A034");
-	INIT_APPLE_DCP_MSG(&a454, "A454");
+	INIT_APPLE_DCP_MSG(&a357, "A357");
+	INIT_APPLE_DCP_MSG(&a401, "A401");
 	INIT_APPLE_DCP_MSG(&a411, "A411");
+	INIT_APPLE_DCP_MSG(&a412, "A412");
+	INIT_APPLE_DCP_MSG(&a426, "A426");
+	INIT_APPLE_DCP_MSG(&a443, "A443");
+	INIT_APPLE_DCP_MSG(&a447, "A447");
+	INIT_APPLE_DCP_MSG(&a454, "A454");
+	INIT_APPLE_DCP_MSG(&a460, "A460");
+	INIT_APPLE_DCP_MSG(&a463, "A463");
+	INIT_APPLE_DCP_MSG(&a468, "A468");
+	INIT_APPLE_DCP_MSG(&a469, "A469");
 
-	printk("zeroth call\n");
-	msleep(delay);
-	printk("first call\n");
 	apple_fw_call(apple, &a401.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a357.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a443.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a029.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a463.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a460.header, STREAM_COMMAND);
-	msleep(delay);
+	apple_fw_call(apple, &a426.header, STREAM_COMMAND);
 	apple_fw_call(apple, &a447.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a034.header, STREAM_COMMAND);
-	msleep(delay);
 	apple_fw_call(apple, &a454.header, STREAM_COMMAND);
-	msleep(delay);
+	apple_fw_call(apple, &a469.header, STREAM_COMMAND);
 	apple_fw_call(apple, &a411.header, STREAM_COMMAND);
-	msleep(delay);
+	apple_fw_call(apple, &a468.header, STREAM_COMMAND);
 
-	msleep(delay);
-	while (true) {
-	msleep(delay);
+	//apple_fw_call(apple, &a000.header, STREAM_COMMAND);
+
+	INIT_APPLE_DCP_MSG(a407, "A407");
+	INIT_APPLE_DCP_MSG(a408, "A408");
+	a407->in.addr = 0xfffffe1667ba4a00;
+	a407->in.flags = 0x0000010000000000;
+	while (delay <= 3000) {
+		u32 swap_id;
 		apple_fw_call(apple, &a407->header, STREAM_COMMAND);
-	msleep(delay);
-		apple_fw_call(apple, &a412.header, STREAM_COMMAND);
-	msleep(delay);
+		swap_id = a407->out.swap_id;
 		msleep(delay);
-	msleep(delay);
+		a408->in.swaprec.flags[0] = 0x861202;
+		a408->in.swaprec.flags[2] = 0x04;
+		a408->in.swaprec.swap_id = swap_id;
+		a408->in.swaprec.surf_ids[0] = surface_id;
+		a408->in.swaprec.src_rect[0].width = 3840;
+		a408->in.swaprec.src_rect[0].height = 2160;
+#if 1
+		a408->in.swaprec.src_rect[1].width = 3840;
+		a408->in.swaprec.src_rect[1].height = 2160;
+		a408->in.swaprec.src_rect[2].width = 3840;
+		a408->in.swaprec.src_rect[2].height = 2160;
+		a408->in.swaprec.src_rect[3].width = 3840;
+		a408->in.swaprec.src_rect[3].height = 2160;
+#endif
+		a408->in.swaprec.surf_flags[0] = 1;
+		a408->in.swaprec.dst_rect[0].width = 3840;
+		a408->in.swaprec.dst_rect[0].height = 2160;
+#if 1
+		a408->in.swaprec.dst_rect[1].width = 3840;
+		a408->in.swaprec.dst_rect[1].height = 2160;
+		a408->in.swaprec.dst_rect[2].width = 3840;
+		a408->in.swaprec.dst_rect[2].height = 2160;
+		a408->in.swaprec.dst_rect[3].width = 3840;
+		a408->in.swaprec.dst_rect[3].height = 2160;
+#endif
+		a408->in.swaprec.swap_enabled = 0x80000007;
+		a408->in.swaprec.swap_completed = 0x80000007;
+		a408->in.surf_addr[0] = apple_get_fb_dva(apple);
+		a408->in.surface[0].format = 0x42475241;
+		a408->in.surface[0].unk2[0] = 0x0d;
+		a408->in.surface[0].unk2[1] = 0x01;
+		a408->in.surface[0].stride = 3840 * 4;
+		a408->in.surface[0].pix_size = 4;
+		a408->in.surface[0].pel_w = 1;
+		a408->in.surface[0].pel_h = 1;
+		a408->in.surface[0].width = 3840;
+		a408->in.surface[0].height = 2160;
+		a408->in.surface[0].buf_size = 3840 * 2160 * 4;
+		a408->in.surface[0].surface_id = surface_id;
+		a408->in.surface[0].has_comp = 1;
+		a408->in.surface[0].has_planes = 1;
+		a408->header.len_input = 0xb64;
+		memset((void *)a408 + 0xb6b, 1, 3);
+		apple_fw_call(apple, &a412.header, STREAM_COMMAND);
+		msleep(delay);
 		apple_fw_call(apple, &a408->header, STREAM_COMMAND);
-	msleep(delay);
-		delay += 500;
-	msleep(delay);
+		delay += 250;
 	}
 
 	return 0;
@@ -988,7 +1203,11 @@ static int apple_dcp_probe(struct platform_device *pdev)
 	if (IS_ERR(apple))
 		return PTR_ERR(apple);
 
-	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+	apple->dev = &pdev->dev;
+
+	apple->dva_display = 0xb0000000;
+	apple->dva_framebuffer = 0xa0000000;
+	ret = dma_set_mask_and_coherent(apple->dev, DMA_BIT_MASK(32));
 	if (ret)
 		return ret;
 
@@ -1005,7 +1224,10 @@ static int apple_dcp_probe(struct platform_device *pdev)
 	}
 
 	INIT_LIST_HEAD(&apple->rbufs);
+	INIT_LIST_HEAD(&apple->callback_messages);
+	INIT_WORK(&apple->work_callback, apple_dcp_work_func);
 	mutex_init(&apple->mutex);
+	spin_lock_init(&apple->lock);
 
 	apple_dcp = apple;
 	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);

@@ -246,6 +246,8 @@ static phys_addr_t apple_dart_hw_get_ttbr_paddr(struct apple_dart *dart,
 	reg = readl(dart->regs + DART_TTBR(sid, idx));
 	if (reg & DART_TTBR_VALID) {
 		reg &= ~DART_TTBR_VALID;
+		printk("get_ttbr_paddr %02x %02x %016llx\n", idx, sid,
+		       (long long)reg);
 		return (u64)reg << DART_TTBR_SHIFT;
 	}
 

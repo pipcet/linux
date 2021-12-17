@@ -105,10 +105,3 @@ static inline int mbox_copy_and_send(struct mbox_chan *chan, void *ptr)
 struct apple_dcp;
 extern void apple_dcp_set_display(struct apple_dcp *, struct device *);
 extern void apple_dcp_set_fb(struct apple_dcp *, struct device *);
-
-extern dma_addr_t apple_display_alloc_buffer(struct apple_dcp_display *,
-					     size_t size,
-					     void **pptr);
-extern dma_addr_t apple_fb_alloc_buffer(struct apple_dcp_fb *,
-					size_t size,
-					void **pptr);
