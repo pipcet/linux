@@ -261,7 +261,7 @@ static void callback_map_buffer(struct apple_dcp *dcp, struct apple_dcp_msg *msg
 	dma_set_mask_and_coherent(dcp->display, DMA_BIT_MASK(32));
 	for (va = rbuf->va; va < rbuf->va + rbuf->size; va += 16384) {
 		iommu_map(domain, rbuf->dva + (va - rbuf->va),
-			  virt_to_phys(va), 16384, IOMMU_READ|IOMMU_WRITE));
+			  virt_to_phys(va), 16384, IOMMU_READ|IOMMU_WRITE);
 	}
 	m->out.dva = rbuf->dva;
 	dcp->dva_display += rbuf->size;
