@@ -389,6 +389,22 @@ static void apple_dart_flush_iotlb_all(struct iommu_domain *domain)
 static void apple_dart_iotlb_sync(struct iommu_domain *domain,
 				  struct iommu_iotlb_gather *gather)
 {
+	struct apple_dart_domain *dart_domain = to_dart_domain(domain);
+	struct io_pgtable_cfg *pgtbl_cfg =
+		&io_pgtable_ops_to_pgtable(dart_domain->pgtbl_ops)->cfg;
+	int i, sid;
+	struct apple_dart *dart = dart_domain->stream_maps[0].dart;
+	if (dart_locked_page_tables(dart)) {
+		for (sid = 0; sid < 16; sid++)
+			for (i = 0; i < 4; i++) {
+				phys_addr_t shadow_ttbr =
+					apple_dart_hw_get_ttbr_paddr(dart, i, sid);
+				if (shadow_ttbr != 0 &&
+				    shadow_ttbr != pgtbl_cfg->apple_dart_cfg.ttbr[i])
+					memcpy(phys_to_virt(shadow_ttbr),
+					       phys_to_virt(pgtbl_cfg->apple_dart_cfg.ttbr[i]), 16384);
+			}
+	}
 	apple_dart_domain_flush_tlb(to_dart_domain(domain));
 }
 
@@ -478,7 +494,7 @@ static int apple_dart_finalize_domain(struct iommu_domain *domain,
 				      int sid)
 {
 	struct apple_dart_domain *dart_domain = to_dart_domain(domain);
-	struct apple_dart *dart = cfg->stream_maps[0].dart;
+ 	struct apple_dart *dart = cfg->stream_maps[0].dart;
 	struct io_pgtable_cfg pgtbl_cfg;
 	int ret = 0;
 	int i;
