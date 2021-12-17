@@ -400,9 +400,11 @@ static void apple_dart_iotlb_sync(struct iommu_domain *domain,
 				phys_addr_t shadow_ttbr =
 					apple_dart_hw_get_ttbr_paddr(dart, i, sid);
 				if (shadow_ttbr != 0 &&
-				    shadow_ttbr != pgtbl_cfg->apple_dart_cfg.ttbr[i])
+				    shadow_ttbr != pgtbl_cfg->apple_dart_cfg.ttbr[i]) {
+					printk("syncing ttbr %016llx -> %016llx\n", shadow_ttbr, pgtbl_cfg->apple_dart_cfg.ttbr[i]);
 					memcpy(phys_to_virt(shadow_ttbr),
 					       phys_to_virt(pgtbl_cfg->apple_dart_cfg.ttbr[i]), 16384);
+				}
 			}
 	}
 	apple_dart_domain_flush_tlb(to_dart_domain(domain));

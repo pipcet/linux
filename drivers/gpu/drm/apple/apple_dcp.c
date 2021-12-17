@@ -191,6 +191,7 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 		size_t off;
 		extern u64 get_fb_physical_address(void);
 		u64 base = get_fb_physical_address();
+		struct iommu_iotlb_gather gather = {};
 		dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		/* XXX work out why dma_alloc_coherent doesn't work here. */
 		va = dma_alloc_noncoherent(dev, 32<<20, &dma_addr, DMA_TO_DEVICE, GFP_KERNEL);
@@ -198,8 +199,14 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 		for (off = 0; off < (32<<20); off += 16384)
 			iommu_map(domain, 0xa0000000+off, base+off, 16384, IOMMU_READ|IOMMU_WRITE);
 		dma_addr = 0xa0000000;
-		*(u64 *)phys_to_virt(0x9fff78280) =
-			*(u64 *)phys_to_virt(0x9fff48280);
+		/* XXX: we need to flush the new PTEs to the old page
+		 * tables, but as the TTBRs are locked, we have to do
+		 * so explicitly. */
+		iommu_iotlb_sync(domain, &gather);
+		/* ... but at least we no longer do it this way. */
+		if (0)
+			*(u64 *)phys_to_virt(0x9fff78280) =
+				*(u64 *)phys_to_virt(0x9fff48280);
 		dcp->va_fb = va;
 	}
 	return dma_addr;
