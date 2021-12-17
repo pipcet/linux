@@ -183,7 +183,6 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 	struct device *dev = dcp->fb;
 	static dma_addr_t dma_addr;
 	void *va;
-	int i;
 
 	BUG_ON(!dcp->fb);
 
@@ -195,11 +194,9 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 		dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		/* XXX work out why dma_alloc_coherent doesn't work here. */
 		va = dma_alloc_noncoherent(dev, 32<<20, &dma_addr, DMA_TO_DEVICE, GFP_KERNEL);
-		memset(va, 255, (32<<20));
 		domain = iommu_get_domain_for_dev(dcp->display);
 		for (off = 0; off < (32<<20); off += 16384)
 			iommu_map(domain, 0xa0000000+off, base+off, 16384, IOMMU_READ|IOMMU_WRITE);
-		memset(va, 255, (32<<20));
 		dma_addr = 0xa0000000;
 		*(u64 *)phys_to_virt(0x9fff78280) =
 			*(u64 *)phys_to_virt(0x9fff48280);
@@ -476,6 +473,7 @@ static ssize_t apple_dcp_command_debugfs_write(struct file *file,
 	struct apple_dcp *dcp = s->private;
 	struct apple_dcp_msg *msg = devm_kzalloc(dcp->dev, size, GFP_KERNEL);
 	struct list_msg *list_msg;
+	int ret;
 
 	if (size < 12) {
 		devm_kfree(dcp->dev, msg);
@@ -803,7 +801,6 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 		a408->in.swaprec.swap_enabled = 0x80000007;
 		a408->in.swaprec.swap_completed = 0x80000007;
 		a408->in.surf_addr[0] = apple_get_fb_dva(dcp);
-		memset(dcp->va_fb, 255, 32<<20);
 		a408->in.surface[0].format = 0x42475241;
 		a408->in.surface[0].unk2[0] = 0x0d;
 		a408->in.surface[0].unk2[1] = 0x01;
@@ -825,7 +822,6 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 		delay += 250;
 	}
 	msleep(10000);
-	memset(dcp->va_fb, 255, 32<<20);
 
 	return 0;
 }
