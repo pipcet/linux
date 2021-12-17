@@ -475,7 +475,8 @@ static void apple_dcp_single_callback(struct apple_dcp *dcp, struct apple_dcp_ms
 		callback++;
 	}
 
-	dev_err(dcp->dev, "callback not found!\n");
+	dev_err(dcp->dev, "callback %c%c%c%c not found!\n",
+		FOURCC_CHARS(msg->header.code));
 }
 
 static void apple_dcp_work_func(struct work_struct *work)
@@ -664,15 +665,6 @@ static const struct drm_crtc_funcs apple_crtc_funcs = {
 	.set_config             = drm_atomic_helper_set_config,
 };
 
-static void apple_encoder_destroy(struct drm_encoder *encoder)
-{
-	drm_encoder_cleanup(encoder);
-}
-
-static const struct drm_encoder_funcs apple_encoder_funcs = {
-	.destroy        = apple_encoder_destroy,
-};
-
 static const struct drm_mode_config_funcs apple_mode_config_funcs = {
 	.atomic_check        = drm_atomic_helper_check,
 	.atomic_commit       = drm_atomic_helper_commit,
@@ -811,8 +803,6 @@ static void apple_dpms(struct drm_encoder *encoder, int mode)
 	}
 }
 
-static struct drm_encoder_helper_funcs apple_encoder_helper_funcs = {
-	.dpms = apple_dpms,
 static int dcp_command_debugfs_show(struct seq_file *s, void *ptr)
 {
 	struct apple_dcp *dcp = s->private;
@@ -1167,25 +1157,9 @@ static int apple_dcp_init(struct apple_dcp *apple)
 		a408->in.swaprec.surf_ids[0] = surface_id;
 		a408->in.swaprec.src_rect[0].width = 3840;
 		a408->in.swaprec.src_rect[0].height = 2160;
-#if 0
-		a408->in.swaprec.src_rect[1].width = 3840;
-		a408->in.swaprec.src_rect[1].height = 2160;
-		a408->in.swaprec.src_rect[2].width = 3840;
-		a408->in.swaprec.src_rect[2].height = 2160;
-		a408->in.swaprec.src_rect[3].width = 3840;
-		a408->in.swaprec.src_rect[3].height = 2160;
-#endif
 		a408->in.swaprec.surf_flags[0] = 1;
 		a408->in.swaprec.dst_rect[0].width = 3840;
 		a408->in.swaprec.dst_rect[0].height = 2160;
-#if 0
-		a408->in.swaprec.dst_rect[1].width = 3840;
-		a408->in.swaprec.dst_rect[1].height = 2160;
-		a408->in.swaprec.dst_rect[2].width = 3840;
-		a408->in.swaprec.dst_rect[2].height = 2160;
-		a408->in.swaprec.dst_rect[3].width = 3840;
-		a408->in.swaprec.dst_rect[3].height = 2160;
-#endif
 		a408->in.swaprec.swap_enabled = 0x80000007;
 		a408->in.swaprec.swap_completed = 0x80000007;
 		a408->in.surf_addr[0] = apple_get_fb_dva(apple);
