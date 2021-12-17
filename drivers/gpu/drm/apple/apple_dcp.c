@@ -533,6 +533,43 @@ static void apple_dcp_debugfs_init_command(struct apple_dcp *dcp, struct dentry 
 			    &real_apple_dcp_command_debugfs_fops);
 }
 
+
+static int apple_dcp_trigger_debugfs_show(struct seq_file *s, void *ptr)
+{
+	return 0;
+}
+
+static int apple_dcp_init_4k(struct apple_dcp *);
+
+static ssize_t apple_dcp_trigger_debugfs_write(struct file *file,
+					       const char __user *user_buf,
+					       size_t size, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct apple_dcp *dcp = s->private;
+
+	apple_dcp_init_4k(dcp);
+	*ppos += size;
+
+	return size;
+}
+
+DEFINE_SHOW_ATTRIBUTE(apple_dcp_trigger_debugfs);
+static const struct file_operations real_apple_dcp_trigger_debugfs_fops = {
+	.owner = THIS_MODULE,
+	.open = apple_dcp_trigger_debugfs_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+	.write = apple_dcp_trigger_debugfs_write,
+};
+
+static void apple_dcp_debugfs_init_trigger(struct apple_dcp *dcp, struct dentry *dentry)
+{
+	debugfs_create_file("trigger", 0600, dentry, dcp,
+			    &real_apple_dcp_trigger_debugfs_fops);
+}
+
 static int apple_dcp_debugfs_init(struct apple_dcp *dcp)
 {
 	struct dentry *dentry;
@@ -543,6 +580,7 @@ static int apple_dcp_debugfs_init(struct apple_dcp *dcp)
 		return PTR_ERR(dentry);
 
 	apple_dcp_debugfs_init_command(dcp, dentry);
+	apple_dcp_debugfs_init_trigger(dcp, dentry);
 
 	return 0;
 }
@@ -722,70 +760,17 @@ struct apple_dcp_msg_set_digital_mode {
 		(ptr)->header.len_output = sizeof((ptr)->out);	\
 	} while (0)
 
-static int apple_dcp_init(struct apple_dcp *dcp)
+static int apple_dcp_init_4k(struct apple_dcp *dcp)
 {
-	struct apple_dcp_msg_init a401 = {};
-	struct apple_dcp_msg_void a357 = {};
-	struct apple_dcp_msg_void_int a000 = {};
-	struct apple_dcp_msg_void_int a443 = {};
-	struct apple_dcp_msg_void a029 = {};
-	struct apple_dcp_msg_int_void a463 = {
-		.in = 1,
-	};
-	struct apple_dcp_msg_void_int a460 = {};
-	struct apple_dcp_msg_color_remap_mode a426 = {
-		.in = { 6, },
-	};
-	struct apple_dcp_msg_color_remap_mode a447 = {};
-	struct apple_dcp_msg_update_notify_clients a034 = {
-		.in = { 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, }
-	};
-	struct apple_dcp_msg_void a454 = {};
-	struct apple_dcp_msg_void_int a469 = {};
-	struct apple_dcp_msg_void_int a411 = {};
 	struct apple_dcp_msg_set_digital_mode a412 = {
 		.in = { 0x59, 0x43, },
 	};
-	struct apple_dcp_msg_set_power_state a468 = {
-		.in = { 1, },
-	};
-
 	struct apple_dcp_msg_begin_swap *a407 = kzalloc(sizeof *a407, GFP_KERNEL);
 	struct apple_dcp_msg_start_swap *a408 = kzalloc(sizeof *a408, GFP_KERNEL);
 	int delay = 2000;
 	u32 surface_id = 3; /* this works... */
 
-	INIT_APPLE_DCP_MSG(&a000, "A000");
-	INIT_APPLE_DCP_MSG(&a029, "A029");
-	INIT_APPLE_DCP_MSG(&a034, "A034");
-	INIT_APPLE_DCP_MSG(&a357, "A357");
-	INIT_APPLE_DCP_MSG(&a401, "A401");
-	INIT_APPLE_DCP_MSG(&a411, "A411");
 	INIT_APPLE_DCP_MSG(&a412, "A412");
-	INIT_APPLE_DCP_MSG(&a426, "A426");
-	INIT_APPLE_DCP_MSG(&a443, "A443");
-	INIT_APPLE_DCP_MSG(&a447, "A447");
-	INIT_APPLE_DCP_MSG(&a454, "A454");
-	INIT_APPLE_DCP_MSG(&a460, "A460");
-	INIT_APPLE_DCP_MSG(&a463, "A463");
-	INIT_APPLE_DCP_MSG(&a468, "A468");
-	INIT_APPLE_DCP_MSG(&a469, "A469");
-
-	apple_fw_call(dcp, &a401.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a357.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a443.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a029.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a463.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a460.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a426.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a447.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a034.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a454.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a469.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a411.header, STREAM_COMMAND);
-	apple_fw_call(dcp, &a468.header, STREAM_COMMAND);
-
-	//apple_fw_call(dcp, &a000.header, STREAM_COMMAND);
 
 	INIT_APPLE_DCP_MSG(a407, "A407");
 	INIT_APPLE_DCP_MSG(a408, "A408");
@@ -830,6 +815,64 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 	}
 	msleep(10000);
 
+	return 0;
+}
+
+static int apple_dcp_init(struct apple_dcp *dcp)
+{
+	struct apple_dcp_msg_init a401 = {};
+	struct apple_dcp_msg_void a357 = {};
+	struct apple_dcp_msg_void_int a000 = {};
+	struct apple_dcp_msg_void_int a443 = {};
+	struct apple_dcp_msg_void a029 = {};
+	struct apple_dcp_msg_int_void a463 = {
+		.in = 1,
+	};
+	struct apple_dcp_msg_void_int a460 = {};
+	struct apple_dcp_msg_color_remap_mode a426 = {
+		.in = { 6, },
+	};
+	struct apple_dcp_msg_color_remap_mode a447 = {};
+	struct apple_dcp_msg_update_notify_clients a034 = {
+		.in = { 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, }
+	};
+	struct apple_dcp_msg_void a454 = {};
+	struct apple_dcp_msg_void_int a469 = {};
+	struct apple_dcp_msg_void_int a411 = {};
+	struct apple_dcp_msg_set_power_state a468 = {
+		.in = { 1, },
+	};
+
+	INIT_APPLE_DCP_MSG(&a000, "A000");
+	INIT_APPLE_DCP_MSG(&a029, "A029");
+	INIT_APPLE_DCP_MSG(&a034, "A034");
+	INIT_APPLE_DCP_MSG(&a357, "A357");
+	INIT_APPLE_DCP_MSG(&a401, "A401");
+	INIT_APPLE_DCP_MSG(&a411, "A411");
+	INIT_APPLE_DCP_MSG(&a426, "A426");
+	INIT_APPLE_DCP_MSG(&a443, "A443");
+	INIT_APPLE_DCP_MSG(&a447, "A447");
+	INIT_APPLE_DCP_MSG(&a454, "A454");
+	INIT_APPLE_DCP_MSG(&a460, "A460");
+	INIT_APPLE_DCP_MSG(&a463, "A463");
+	INIT_APPLE_DCP_MSG(&a468, "A468");
+	INIT_APPLE_DCP_MSG(&a469, "A469");
+
+	apple_fw_call(dcp, &a401.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a357.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a443.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a029.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a463.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a460.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a426.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a447.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a034.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a454.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a469.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a411.header, STREAM_COMMAND);
+	apple_fw_call(dcp, &a468.header, STREAM_COMMAND);
+
+	apple_dcp_init_4k(dcp);
 	return 0;
 }
 
