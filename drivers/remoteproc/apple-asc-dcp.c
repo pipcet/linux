@@ -161,10 +161,7 @@ static int apple_dcp_send_data(struct mbox_chan *chan, void *msg_header);
 static void apple_dcp_msg_print(struct apple_dcp_msg *msg)
 {
 	printk("message %c%c%c%c, %d/%d\n",
-	       (msg->header.code>>24) & 255,
-	       (msg->header.code>>16) & 255,
-	       (msg->header.code>>8) & 255,
-	       msg->header.code & 255,
+	       FOURCC_CHARS(msg->header.code),
 	       (int)msg->header.len_input,
 	       (int)msg->header.len_output);
 
@@ -486,15 +483,9 @@ static void apple_asc_dcp_work_allocate_buffer_func(struct work_struct *work);
 				printk(KERN_EMERG "THAT'S WRONG\n");
 			}
 
-			if (0)
-			print_hex_dump(KERN_EMERG, "response:", DUMP_PREFIX_OFFSET,
-				       16, 1, dcp->buf[bufno].base + off + 12 + in_len, out_len, true);
 			mbox.payload = 0x342;
 			mbox.endpoint = dcp->endpoint;
 			spin_unlock_irqrestore(&dcp->lock, flags);
-			if (dcp->buf[bufno].base && 0)
-				print_hex_dump(KERN_EMERG, "inbuf:", DUMP_PREFIX_OFFSET,
-					       16, 1, dcp->buf[bufno].base, 256, true);
 			mbox_copy_and_send(dcp->chan, &mbox);
 		} else {
 			dev_warn(dcp->dev, "unhandled message %016llx\n",
@@ -548,9 +539,8 @@ static void apple_asc_dcp_work_map_physical_func(struct work_struct *work)
 	static u64 static_address = 0x30000000;
 	struct apple_mbox_msg mbox;
 	/* map_physical */
-	printk("dsmac %d\n",
-	       dma_set_mask_and_coherent(dcp->rproc->dev.parent,
-					 DMA_BIT_MASK(32)));
+	dma_set_mask_and_coherent(dcp->rproc->dev.parent,
+				  DMA_BIT_MASK(32));
 	domain = iommu_domain_alloc(dcp->dev->bus);
 	mdelay(100);
 	mdelay(100);
@@ -619,7 +609,6 @@ static void apple_asc_dcp_work_map_buffer_func(struct work_struct *work)
 			break;
 	}
 	if (list_entry_is_head(rbuf, &dcp->rbufs, list)) {
-		printk("not found!\n");
 		return;
 	}
 	/* map_buffer */
@@ -631,23 +620,16 @@ static void apple_asc_dcp_work_map_buffer_func(struct work_struct *work)
 	mdelay(100);
 	rbuf->dva = static_addr;
 	iommu_attach_device(domain, dcp->dev);
-	printk("domain %p\n", domain);
 	mdelay(100);
 	for (va = rbuf->va; va < rbuf->va + rbuf->size; va += 16384) {
 		iommu_map(domain, rbuf->dva + (va - rbuf->va),
 			  virt_to_phys(va), 16384, IOMMU_READ|IOMMU_WRITE);
 	}
 	m->out.dva = rbuf->dva;
-	if (0)
-	print_hex_dump(KERN_EMERG, "response:", DUMP_PREFIX_OFFSET,
-		       16, 1, ptr + 12 + in_len, out_len, true);
 	mdelay(100);
 	mbox.payload = 0x42;
 	mbox.endpoint = dcp->endpoint;
 	int bufno = BUF_CALLBACK;
-	if (dcp->buf[bufno].base && 0)
-		print_hex_dump(KERN_EMERG, "inbuf:", DUMP_PREFIX_OFFSET,
-			       16, 1, dcp->buf[bufno].base, 256, true);
 	static_addr += size;
 	mbox_copy_and_send(dcp->chan, &mbox);
 }
@@ -678,7 +660,6 @@ static void apple_asc_dcp_work_allocate_buffer_func(struct work_struct *work)
 	u32 in_len = *(u32 *)((u8 *)(ptr + 4));
 	u32 out_len = *(u32 *)((u8 *)(ptr + 8));
 	struct apple_mbox_msg mbox;
-	printk("allocate_buffer\n");
 	list_add(&rbuf->list, &dcp->rbufs);
 	rbuf->id = ++dcp->rbuf_id;
 	mdelay(100);
@@ -693,19 +674,11 @@ static void apple_asc_dcp_work_allocate_buffer_func(struct work_struct *work)
 	m->out.mapid = rbuf->id;
 	m->out.dva = dma_addr;
 	m->out.dvasize = round_up(size, 16384);
-	printk("temp_buffer %p dma_addr %016llx\n",
-	       temp_buffer, dma_addr);
 	mdelay(100);
-	if (0)
-	print_hex_dump(KERN_EMERG, "response:", DUMP_PREFIX_OFFSET,
-		       16, 1, ptr + 12 + in_len, out_len, true);
 	mdelay(100);
 	mbox.payload = 0x42;
 	mbox.endpoint = dcp->endpoint;
 	int bufno = BUF_CALLBACK;
-	if (dcp->buf[bufno].base && 0)
-		print_hex_dump(KERN_EMERG, "inbuf:", DUMP_PREFIX_OFFSET,
-			       16, 1, dcp->buf[bufno].base, 256, true);
 	mbox_copy_and_send(dcp->chan, &mbox);
 }
 
@@ -811,7 +784,6 @@ static void apple_asc_dcp_work_hardware_boot_func(struct work_struct *work)
 	msg->mbox.payload = 0x2;
 	msg->mbox.endpoint = dcp->endpoint;
 
-	printk("booting hardware\n");
 	/* A357: set_create_DFB() */
 	msg->dcp.code = FOURCC("A357");
 	msg->dcp.len_input = 0;
@@ -952,7 +924,6 @@ static void apple_asc_dcp_work_hardware_boot_func(struct work_struct *work)
 		apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 		memcpy(&io_user_client, msg->dcp_data, sizeof(io_user_client));
 		swapid = io_user_client.out.swapid;
-		printk("swapid 0x%x\n", swapid);
 		if (1) {
 			/* A412: setDigitalMode(0x59, 0x43) */
 			const u32 mode_args[] = { 0x59, 0x43 };
@@ -963,10 +934,6 @@ static void apple_asc_dcp_work_hardware_boot_func(struct work_struct *work)
 			apple_asc_dcp_transaction(&dcp->downstream_chans[STREAM_COMMAND], msg);
 		}
 		msleep(delay); delay += 500;
-		printk("%zd == 80?\n", sizeof(struct apple_plane_info));
-		printk("total size: %d\n", (int)sizeof(struct apple_swap_submit_dcp));
-		printk("swaprec: %d == 800\n", (int)sizeof(struct apple_swaprec));
-		printk("surface: %d == 516\n", (int)sizeof(struct apple_surface));
 		swap_submit->swaprec.flags[0] = 0x861202;
 		swap_submit->swaprec.flags[2] = 0x04;
 		swap_submit->swaprec.swap_id = swapid;
@@ -1210,7 +1177,6 @@ apple_asc_dcp_shmem_msg_out(struct apple_asc_dcp *dcp, void *msg_header, int str
 		kfree(shmem_msg);
 		return NULL;
 	}
-	printk("bufno %d @ %p + %016llx\n", bufno, dcp->buf[bufno].base, shmem_msg->buf_off);
 	shmem_msg->buf_msg = dcp->buf[bufno].base + shmem_msg->buf_off;
 	shmem_msg->msg = msg_header;
 
@@ -1297,10 +1263,6 @@ static int apple_asc_dcp_pongping_response(struct apple_asc_dcp *dcp, void *msg_
 {
 	struct apple_asc_dcp_shmem_msg *shmem_msg =
 		apple_asc_dcp_find_shmem_msg(dcp, msg_header, stream);
-
-	if (memcmp(msg_header, "321D", 4) &&
-	    memcmp(msg_header, "565D", 4))
-		apple_dcp_msg_print(msg_header);
 
 	BUG_ON(!shmem_msg);
 	apple_asc_dcp_send_ack(dcp, stream);
@@ -1455,7 +1417,6 @@ static int apple_asc_dcp_probe(struct platform_device *pdev)
 	dcp->buf_va = dma_alloc_coherent(dcp->dev, dcp->buf_va_size,
 					 &iova, GFP_KERNEL);
 
-	printk("va %p\n", dcp->buf_va);
 	if (!dcp->buf_va)
 		return -ENOMEM;
 
