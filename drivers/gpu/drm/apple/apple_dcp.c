@@ -113,7 +113,7 @@
 #define STREAM_NESTED_COMMAND	3 /* ping pong */
 
 struct apple_dcp;
-struct apple_drm_stream {
+struct apple_dcp_stream {
 	struct apple_dcp *self;
 	struct mbox_client cl;
 	struct mbox_chan *dcp;
@@ -138,7 +138,7 @@ struct apple_dcp {
 	struct device *dev;
 	struct mutex mutex;
 	bool forced_to_4k;
-	struct apple_drm_stream stream[N_STREAMS];
+	struct apple_dcp_stream stream[N_STREAMS];
 	struct kvbox kvbox;
 	struct work_struct work;
 	struct work_struct work_callback;
@@ -906,7 +906,8 @@ static void apple_handle_d116(struct apple_dcp *apple);
 
 static void apple_dcp_receive_data(struct mbox_client *cl, void *msg)
 {
-	struct apple_drm_stream *stream = container_of(cl, struct apple_drm_stream, cl);
+	struct apple_dcp_stream *stream =
+		container_of(cl, struct apple_dcp_stream, cl);
 	struct apple_dcp *apple = stream->self;
 	int streamno = stream - apple->stream;
 
@@ -917,8 +918,7 @@ static void apple_dcp_receive_data(struct mbox_client *cl, void *msg)
 		break;
 
 	case STREAM_ASYNC:
-	case STREAM_CALLBACK:
-	{
+	case STREAM_CALLBACK: {
 		struct list_msg *list_msg = devm_kzalloc(apple->dev, sizeof(*list_msg), GFP_KERNEL);
 		char *str = msg;
 		list_msg->msg = msg;
