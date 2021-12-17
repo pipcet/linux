@@ -156,6 +156,7 @@ struct apple_dcp {
 	u32 rbuf_id;
 	struct list_head rbufs;
 	struct list_head callback_messages;
+	struct list_head debugfs_messages;
 	u32 *regdump;
 	struct backlight_device *backlight;
 
@@ -812,7 +813,101 @@ static void apple_dpms(struct drm_encoder *encoder, int mode)
 
 static struct drm_encoder_helper_funcs apple_encoder_helper_funcs = {
 	.dpms = apple_dpms,
+static int dcp_command_debugfs_show(struct seq_file *s, void *ptr)
+{
+	struct apple_dcp *dcp = s->private;
+	struct completion c;
+	void *buf;
+	int ret;
+	struct list_msg *list_msg;
+
+	if (list_empty(&dcp->debugfs_messages))
+		return 0;
+
+	list_msg = list_first_entry(&dcp->debugfs_messages, struct list_msg, list);
+	seq_write(s, list_msg->msg, apple_dcp_msg_size(&list_msg->msg->header));
+	list_del(&list_msg->list);
+	devm_kfree(dcp->dev, list_msg->msg);
+	devm_kfree(dcp->dev, list_msg);
+
+	return 0;
+}
+
+static ssize_t dcp_command_debugfs_write(struct file *file,
+					 const char __user *user_buf,
+					 size_t size, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct apple_dcp *dcp = s->private;
+	struct completion c;
+	void *buf;
+	int ret;
+	struct apple_dcp_msg *msg = devm_kzalloc(dcp->dev, size, GFP_KERNEL);
+	struct list_msg *list_msg;
+
+	if (size < 12) {
+		devm_kfree(dcp->dev, msg);
+		return -EINVAL;
+	}
+
+	if (copy_from_user(msg, user_buf, size)) {
+		devm_kfree(dcp->dev, msg);
+		return -EFAULT;
+	}
+
+	if (apple_dcp_msg_size(&msg->header) != size) {
+		devm_kfree(dcp->dev, msg);
+		return -EINVAL;
+	}
+	*ppos += size;
+
+	list_msg = devm_kzalloc(dcp->dev, sizeof *list_msg, GFP_KERNEL);
+	if (!list_msg) {
+		devm_kfree(dcp->dev, msg);
+		return -ENOMEM;
+	}
+
+	ret = apple_fw_call(dcp, &msg->header, STREAM_COMMAND);
+	if (ret) {
+		devm_kfree(dcp->dev, list_msg);
+		devm_kfree(dcp->dev, msg);
+		return ret;
+	}
+
+	list_msg->msg = msg;
+	list_add(&list_msg->list, &dcp->debugfs_messages);
+
+	return size;
+}
+
+DEFINE_SHOW_ATTRIBUTE(dcp_command_debugfs);
+static const struct file_operations real_dcp_command_debugfs_fops = {
+	.owner = THIS_MODULE,
+	.open = dcp_command_debugfs_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+	.write = dcp_command_debugfs_write,
 };
+
+static void apple_dcp_debugfs_init_command(struct apple_dcp *dcp, struct dentry *dentry)
+{
+	debugfs_create_file("command", 0600, dentry, dcp, &real_dcp_command_debugfs_fops);
+}
+
+static int apple_dcp_debugfs_init(struct apple_dcp *dcp)
+{
+	struct dentry *dentry;
+
+	dentry = debugfs_create_dir("dcp", NULL);
+
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
+	apple_dcp_debugfs_init_command(dcp, dentry);
+
+	return 0;
+}
 
 extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
 					   struct device *dev);
@@ -1153,12 +1248,15 @@ static int apple_dcp_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&apple->rbufs);
 	INIT_LIST_HEAD(&apple->callback_messages);
+	INIT_LIST_HEAD(&apple->debugfs_messages);
 	INIT_WORK(&apple->work_callback, apple_dcp_work_func);
 	mutex_init(&apple->mutex);
 	spin_lock_init(&apple->lock);
 
 	apple_dcp = apple;
 	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
+
+	apple_dcp_debugfs_init(apple);
 
 err_unload:
 	return ret;

@@ -105,3 +105,9 @@ static inline int mbox_copy_and_send(struct mbox_chan *chan, void *ptr)
 struct apple_dcp;
 extern void apple_dcp_set_display(struct apple_dcp *, struct device *);
 extern void apple_dcp_set_fb(struct apple_dcp *, struct device *);
+
+extern inline size_t apple_dcp_msg_size(struct apple_dcp_msg_header *msg)
+{
+	return sizeof(*msg) + msg->len_input + msg->len_output;
+}
+

@@ -155,11 +155,6 @@ struct apple_asc_dcp {
 	struct device *display_dev;
 };
 
-size_t apple_dcp_msg_size(struct apple_dcp_msg_header *msg)
-{
-	return sizeof(*msg) + msg->len_input + msg->len_output;
-}
-
 /* XXX prototype for debugging */
 static int apple_dcp_send_data(struct mbox_chan *chan, void *msg_header);
 
