@@ -90,6 +90,7 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/permalloc.h>
 #include <linux/pm_runtime.h>
 
 #define N_STREAMS		4
@@ -202,7 +203,7 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 		/* XXX: we need to flush the new PTEs to the old page
 		 * tables, but as the TTBRs are locked, we have to do
 		 * so explicitly. */
-		iommu_iotlb_sync(domain, &gather);
+		iommu_iotlb_sync(domain, &gather); permalloc_init();
 		/* ... but at least we no longer do it this way. */
 		if (0)
 			*(u64 *)phys_to_virt(0x9fff78280) =
@@ -282,6 +283,7 @@ static void callback_allocate_buffer(struct apple_dcp *dcp, struct apple_dcp_msg
 		dev_err(dcp->dev, "allocation failed!\n");
 		return;
 	}
+	permalloc_memory(dcp->dev, va, m->in.size);
 	/* we don't allocate a physically contiguous buffer,
 	 * necessarily, and why would a device behind an IOMMU care
 	 * about a physical address in the first place? */
