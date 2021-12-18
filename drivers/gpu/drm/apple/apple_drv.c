@@ -43,11 +43,21 @@
 #define SURF_FRAMEBUFFER_0 0x54 /* start of framebuffer */
 #define SURF_FRAMEBUFFER_1 0x58 /* end of framebuffer ? */
 
+#define N_STREAMS		4
+#define STREAM_COMMAND		0 /* ping pong: receive msg, send modified msg */
+#define STREAM_CALLBACK		1 /* pong ping: send msg, receive modified msg */
+#define STREAM_ASYNC		2 /* pong ping */
+#define STREAM_NESTED_COMMAND	3 /* ping pong */
+
+struct apple_drm_private;
 struct apple_drm_private {
 	struct drm_device	drm;
 	bool			forced_to_4k;
-	struct mbox_client	cl;
-	struct mbox_chan *	dcp;
+	struct {
+		struct apple_drm_private *self;
+		struct mbox_client cl;
+		struct mbox_chan *dcp;
+	} stream[N_STREAMS];
 	struct kvbox		kvbox;
 	struct work_struct	work;
 	struct apple_dcp_mbox_msg *msg;
@@ -189,6 +199,42 @@ static int apple_external(struct apple_drm_private *apple)
 	writel(0xf000870, apple->regs + 0x10128);
 
 	return 0;
+}
+
+static int apple_fw_call(struct apple_drm_private *apple,
+			 u32 fourcc,
+			 void *input, size_t len_input,
+			 void *output, size_t len_output)
+{
+	struct apple_dcp_mbox_msg *msg =
+		devm_kzalloc(apple->drm.dev,
+			     sizeof(*msg) + 0x100 + len_input + len_output,
+			     GFP_KERNEL);
+	int ret;
+
+	msg->mbox.payload = 0x202;
+	msg->dcp.code = fourcc;
+	msg->dcp.len_input = len_input;
+	msg->dcp.len_output = len_output;
+	memset(msg->dcp_data, 0, len_input + len_output + 0x100);
+	memcpy(msg->dcp_data, input, len_input);
+
+	printk("starting transaction...\n"); msleep(250);
+	ret = apple_dcp_transaction(apple->dcp, msg);
+	printk("transaction completed.\n"); msleep(250);
+	devm_kfree(apple->drm.dev, msg);
+
+	return ret;
+}
+
+static int apple_fw_call_void(struct apple_drm_private *apple, u32 fourcc)
+{
+	return apple_fw_call(apple, fourcc, NULL, 0, NULL, 0);
+}
+
+static int apple_fw_call_int(struct apple_drm_private *apple, u32 fourcc, u32 data)
+{
+	return apple_fw_call(apple, fourcc, &data, 0, NULL, 4);
 }
 
 static int apple_switch_4k(struct apple_drm_private *apple)
@@ -579,6 +625,9 @@ static struct drm_encoder_helper_funcs apple_encoder_helper_funcs = {
 	.dpms = apple_dpms,
 };
 
+extern int apple_dcp_reached_hardware_boot(struct mbox_chan *chan,
+					   struct device *dev);
+
 static int apple_platform_probe(struct platform_device *pdev)
 {
 	struct apple_drm_private *apple;
@@ -586,9 +635,7 @@ static int apple_platform_probe(struct platform_device *pdev)
 	struct drm_crtc *crtc;
 	struct drm_encoder *encoder;
 	struct drm_connector *connector;
-	int ret;
-
-	return -ENODEV;
+	int ret, i;
 
 	apple = devm_drm_dev_alloc(&pdev->dev, &apple_drm_driver,
 				   struct apple_drm_private, drm);
@@ -614,13 +661,38 @@ static int apple_platform_probe(struct platform_device *pdev)
 				   GFP_KERNEL))
 		return -ENOMEM;
 
-	apple->cl.dev = &pdev->dev;
-	apple->dcp = mbox_request_channel(&apple->cl, 0);
-	if (IS_ERR(apple->dcp)) {
-		ret = PTR_ERR(apple->dcp);
-		goto err_unload;
+	for (i = 0; i < N_STREAMS; i++) {
+		apple->stream[i].self = apple;
+		apple->stream[i].cl.dev = &pdev->dev;
+		apple->stream[i].dcp = mbox_request_channel(&apple->stream[i].cl, i);
+		if (IS_ERR(apple->stream[i].dcp)) {
+			ret = PTR_ERR(apple->stream[i].dcp);
+			goto err_unload;
+		}
 	}
 
+	static int counter;
+	if (!apple_dcp_reached_hardware_boot(apple->dcp[0], apple->cl.dev))
+		msleep(1000);
+	if (counter++ >= 0) {
+		printk("initializing...\n"); msleep(250);
+		u32 dummy = 0;
+		apple_fw_call(apple, FOURCC("A401"), NULL, 0, NULL, 4);
+		printk("initialized.\n"); msleep(250);
+	}
+	while (!apple_dcp_reached_hardware_boot(apple->dcp[0], apple->cl.dev))
+		msleep(1000);
+	return -ENODEV;
+	msleep(3000);
+	if (1) {
+		int set_power_state_data[3] = { 1, };
+		int update_notify_clients_dcp_data[] = {
+			0,0,0,0,0,0,0,1,1,1,0,1,1,1
+		};
+		apple_fw_call_void(apple, FOURCC("A401")); /* start_signal */
+	}
+
+	return -ENODEV;
 	/*
 	 * Remove early framebuffers (ie. simplefb). The framebuffer can be
 	 * located anywhere in RAM
