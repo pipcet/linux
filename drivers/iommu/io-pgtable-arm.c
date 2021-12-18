@@ -494,8 +494,10 @@ static int arm_lpae_map_pages(struct io_pgtable_ops *ops, unsigned long iova,
 		return -ERANGE;
 
 	/* If no access, then nothing to do */
-	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
+	if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE))) {
+		*mapped = pgsize * pgcount;
 		return 0;
+	}
 
 	prot = arm_lpae_prot_to_pte(data, iommu_prot);
 	ret = __arm_lpae_map(data, iova, paddr, pgsize, pgcount, prot, lvl,
