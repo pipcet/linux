@@ -21,14 +21,20 @@ static int permalloc_debugfs_show(struct seq_file *s, void *ptr)
 }
 DEFINE_SHOW_ATTRIBUTE(permalloc_debugfs);
 
-static void permalloc_init(void)
+void permalloc_init(void)
 {
-	INIT_LIST_HEAD(&permallocs);
+	if (!permalloc_initialized)
+		INIT_LIST_HEAD(&permallocs);
+
+	permalloc_initialized = true;
 
 	permalloc_debugfs_dir = debugfs_create_dir("permallocs", NULL);
+	if (IS_ERR(permalloc_debugfs_dir))
+		return;
 
 	debugfs_create_file("permallocs", 0400, permalloc_debugfs_dir, NULL, &permalloc_debugfs_fops);
 }
+EXPORT_SYMBOL(permalloc_init);
 
 int permalloc_bool(struct device *dev, const char *name)
 {
