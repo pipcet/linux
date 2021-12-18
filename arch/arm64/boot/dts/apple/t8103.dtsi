@@ -543,6 +543,88 @@
 			interrupts = <AIC_IRQ 702 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
+		smc_mbox: smc_mbox@23e408000 {
+		        compatible = "apple,apple-mailbox";
+			reg = <0x2 0x3e408000 0 0x4000>;
+			#mbox-cells = <1>; /* could be 0, but that requires extra code */
+			interrupt-parent = <&aic>;
+			interrupts = <0 400 4  0 403 4>;
+		};
+
+		smc_asc: smc_asc@23e400000 {
+		        compatible = "apple,apple-asc";
+			reg = <0x2 0x3e400000 0 0x8000>;
+			rproc-name = "smc";
+			mboxes = <&smc_mbox 0>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			smc_asc_mgmt: smc_asc_mgmt@0 {
+				compatible = "apple,apple-asc-mgmt", "apple,apple-asc-system-endpoint";
+				mboxes = <&smc_asc 0x0>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_panic: smc_asc_panic@1 {
+				compatible = "apple,apple-asc-panic", "apple,apple-asc-system-endpoint";
+				mboxes = <&smc_asc 0x1>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_syslog: smc_asc_syslog@2 {
+				compatible = "apple,apple-asc-syslog", "apple,apple-asc-system-endpoint";
+				mboxes = <&smc_asc 0x2>;
+				rprocs = <&smc_asc>;
+			};
+			smc_asc_ioreport: smc_asc_ioreport@4 {
+				compatible = "apple,apple-asc-ioreport", "apple,apple-asc-system-endpoint";
+				mboxes = <&smc_asc 0x4>;
+				rprocs = <&smc_asc>;
+			};
+			smc: smc_asc_smc@20 {
+			        compatible = "apple,apple-asc-smc";
+				mboxes = <&smc_asc 0x20>;
+				rprocs = <&smc_asc>;
+				#address-cells = <1>;
+				#size-cells = <1>;
+				#kvbox-cells = <1>;
+				#mbox-cells = <1>;
+				smc_gpio: smc_gpio {
+					pin-count = <2>;
+					pin-prefix = "smc";
+					compatible = "kvbox-gpio";
+					kvboxes = <&smc 0>;
+					kvbox-keys = "gP0d", "gP12";
+					kvbox-read-suffix = /bits/ 8 <0x01 0x00 0x00 0x00>;
+					kvbox-write-enable = /bits/ 8 <0x01 0x00 0x80 0x00>;
+					kvbox-write-disable = /bits/ 8 <0x00 0x00 0x00 0x00>;
+					gpio-line-names = "gP0d", "gP12";
+				        gpio-controller;
+					#gpio-cells = <2>;
+
+#define SMC_IRQ_BATT 0
+#define SMC_IRQ_HID 1
+
+#define SMC_PIN(a,b,c,d,description) \
+	pin_##a##b##c##d { \
+		gpio-line-name = description; \
+	        key-read = /bits/ 8 <ASCII_##d ASCII_##c ASCII_##b ASCII_##a 0x01 0x00 0x00 0x00>; \
+	        key-write = /bits/ 8 <ASCII_##d ASCII_##c ASCII_##b ASCII_##a>; \
+	        data-enable = /bits/ 8 <0x01 0x00 0x00 0x00>; \
+	        data-disable = /bits/ 8 <0x00 0x00 0x00 0x00>; \
+	}
+	     		      		SMC_PIN(g,P,0,d,"PCI power");
+					SMC_PIN(g,P,1,2,"backlight power");
+				};
+				smc_adc {
+					compatible = "apple,apple-asc-smc-adc";
+					kvboxes = <&smc 0>;
+					#kvbox-cells = <1>;
+				};
+				smc_hid {
+					compatible = "apple,apple-asc-smc-hid";
+					mboxes = <&smc 0>;
+					kvboxes = <&smc 0>;
+				};
+			};
+		};
 
 		disp_dart: iommu@2313040000 {
 			compatible = "apple,t8103-dart";
@@ -643,6 +725,65 @@
 			};
 		};
 
+		ans_sart: iommu@27bc50000 {
+			compatible = "apple,apple-sart";
+			reg = <0x2 0x7bc50000 0x0 0x10000>;
+			#iommu-cells = <1>;
+		};
+
+		ans_mbox: mbox@277408000 {
+			compatible = "apple,apple-mailbox";
+			reg = <0x2 0x77408000 0x0 0x8000>;
+			interrupt-parent = <&aic>;
+			interrupts = <AIC_IRQ 583 IRQ_TYPE_LEVEL_HIGH>, <AIC_IRQ 586 IRQ_TYPE_LEVEL_HIGH>;
+			#mbox-cells = <1>; /* could be 0, but requires extra code */
+			/* HACK alert: we don't go through the SART, ans_asc does, but the SART doesn't implement a proper iommu, just a startup function... */
+			iommus = <&ans_sart 0>;
+		};
+
+		ans_asc: remoteproc@277400000 {
+		        compatible = "apple,apple-asc";
+			reg = <0x2 0x77400000 0 0x8000>;
+			rproc-name = "ans";
+			mboxes = <&ans_mbox 0>;
+			#mbox-cells = <1>;
+			endpoints = <0>;
+			#address-cells = <2>;
+			#size-cells = <2>;
+			ans_asc_mgmt: ans_asc_mgmt {
+				compatible = "apple,apple-asc-mgmt", "apple,apple-asc-system-endpoint";
+				mboxes = <&ans_asc 0x0>;
+				rprocs = <&ans_asc>;
+			};
+			ans_asc_panic: ans_asc_panic {
+				compatible = "apple,apple-asc-panic", "apple,apple-asc-system-endpoint";
+				mboxes = <&ans_asc 0x1>;
+				rprocs = <&ans_asc>;
+			};
+			ans_asc_syslog: ans_asc_syslog {
+				compatible = "apple,apple-asc-iorpt", "apple,apple-asc-system-endpoint";
+				mboxes = <&ans_asc 0x2>;
+				rprocs = <&ans_asc>;
+			};
+			ans_asc_ioreport: ans_asc_ioreport {
+				compatible = "apple,apple-asc-iorpt", "apple,apple-asc-system-endpoint";
+				mboxes = <&ans_asc 0x4>;
+				rprocs = <&ans_asc>;
+			};
+			ans_asc_ans: ans_asc_ans {
+				compatible = "apple,apple-asc-ans", "apple,apple-asc-system-endpoint";
+				mboxes = <&ans_asc 0x20>;
+				#mbox-cells = <1>;
+				rprocs = <&ans_asc>;
+			};
+		};
+		ans2_hdd: nvme@27bcc0000 {
+                        compatible = "apple,t8103-ans-nvme";
+                        reg = <0x2 0x7bcc0000 0x0 0x40000>;
+                        interrupt-parent = <&aic>;
+                        interrupts = <AIC_IRQ 590 IRQ_TYPE_LEVEL_HIGH>;
+		        mboxes = <&ans_asc_ans 0>;
+                };
 
 		pcie0: pcie@690000000 {
 			compatible = "apple,t8103-pcie", "apple,pcie";
