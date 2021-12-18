@@ -205,6 +205,21 @@ struct apple_bootargs {
 	u64 mem_size_actual;
 };
 
+u64 framebuffer_physical_address;
+
+u64 get_fb_physical_address(void)
+{
+	printk("returning %016llx\n", framebuffer_physical_address);
+	return framebuffer_physical_address;
+}
+EXPORT_SYMBOL(get_fb_physical_address);
+
+void set_fb_physical_address(u64 addr)
+{
+	framebuffer_physical_address = addr;
+}
+EXPORT_SYMBOL(set_fb_physical_address);
+
 #ifdef CONFIG_BUILTIN_DEVICE_TREE_TEMPLATE
 static void __init fixup_fdt(u64 bootargs_phys, u64 base) __attribute__((__noinline__));
 static void __init fixup_fdt(u64 bootargs_phys, u64 base)
