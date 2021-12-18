@@ -4,6 +4,8 @@
 
 #define FOURCC(a) ((((a)[0])<<24) | (((a)[1])<<16) | (((a)[2])<<8) | (((a)[3])))
 #define U32_FOURCC(a) ((((a)[3])<<24) | (((a)[2])<<16) | (((a)[1])<<8) | (((a)[0])))
+#define FOURCC_CHARS(a) (((a)>>24)&255), (((a)>>16)&255), (((a)>>8)&255), ((a)&255)
+
 /* A message at the physical mbox level. 64-bit payload plus 64-bit
  * information which includes, in its low-order bits, an 8-bit endpoint. */
 struct apple_mbox_msg {
@@ -15,6 +17,11 @@ struct apple_dcp_msg_header {
 	u32 code;
 	u32 len_input;
 	u32 len_output;
+};
+
+struct apple_dcp_msg {
+	struct apple_dcp_msg_header header;
+	char data[];
 };
 
 struct apple_dcp_mbox_msg {
@@ -96,3 +103,13 @@ static inline int mbox_copy_and_send(struct mbox_chan *chan, void *ptr)
 	memcpy(msg, ptr, sizeof(*msg));
 	return mbox_send_message(chan, msg);
 }
+
+struct apple_dcp;
+extern void apple_dcp_set_display(struct apple_dcp *, struct device *);
+extern void apple_dcp_set_fb(struct apple_dcp *, struct device *);
+
+extern inline size_t apple_dcp_msg_size(struct apple_dcp_msg_header *msg)
+{
+	return sizeof(*msg) + msg->len_input + msg->len_output;
+}
+
