@@ -7,6 +7,7 @@ struct permalloc_entry {
 	struct list_head list;
 	struct device *dev;
 	const char *str;
+	const char *str2;
 };
 
 extern int permalloc_bool(struct device *dev, const char *name);
