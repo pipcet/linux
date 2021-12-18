@@ -642,6 +642,7 @@
 			reg-names = "fbcontrols";
 			mboxes = <&dcp_asc_dcp 0>;
 			#kvbox-cells = <1>;
+			dart-sid = <4>;
 		};
 
 		dcp_mbox: dcp_mbox@231c08000 {
@@ -664,10 +665,11 @@
 		        compatible = "apple,apple-asc";
 			reg = <0x2 0x31c00000 0 0x8000>;
 			rproc-name = "dcp";
-			iommus = <&dcp_dart 15>;
+			iommus = <&dcp_dart 0>;
 			mboxes = <&dcp_mbox 0>;
 			#mbox-cells = <1>;
 			endpoints = <0>;
+			dart-sid = <0>;
 			dcp_asc_mgmt: dcp_asc_mgmt@0 {
 				compatible = "apple,apple-asc-mgmt", "apple,apple-asc-system-endpoint";
 				mboxes = <&dcp_asc 0x0>;
