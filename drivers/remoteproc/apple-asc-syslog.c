@@ -26,6 +26,8 @@ struct apple_syslog {
 	u64 buf_iova;
 	u64 payload;
 	u64 endpoint;
+	u32 printed;
+	u32 toprint;
 };
 
 static void apple_syslog_allocator_func(struct work_struct *work)
@@ -55,20 +57,20 @@ static void apple_syslog_message_func(struct work_struct *work)
 {
 	struct apple_syslog *syslog = container_of(work, struct apple_syslog,
 						   work_message);
-	static char pbuf[0x80];
+	static char pbuf[0xa0];
 	struct apple_mbox_msg response;
 	int i;
-	int page;
 
-	response.payload = syslog->payload;
-	page = syslog->payload & 0x1f;
-	response.endpoint = syslog->endpoint;
-	for (i = 0; i < 0x80; i++) {
-		pbuf[i] = readb(syslog->buf + page * 0x80 + i);
+	for (; syslog->printed != syslog->toprint;
+	     syslog->printed = (syslog->printed + 1) % 0x40) {
+		for (i = 0; i < 0xa0; i++) {
+			pbuf[i] = readb(syslog->buf + syslog->printed * 0xa0
+					+ i);
+		}
+
+		print_hex_dump(KERN_EMERG, "message:", DUMP_PREFIX_NONE,
+			       16, 1, pbuf, 128, true);
 	}
-
-	print_hex_dump(KERN_EMERG, "message:", DUMP_PREFIX_NONE,
-		       16, 1, pbuf, 128, true);
 
 	//mbox_copy_and_send(syslog->chan, &response);
 }
@@ -91,6 +93,9 @@ static void apple_syslog_receive_data(struct mbox_client *cl, void *msg)
 	    syslog->buf == NULL) {
 		schedule_work(&syslog->work_allocator);
 	} else if (syslog->buf) {
+		syslog->toprint = FIELD_GET(GENMASK(5, 0), syslog->payload);
+		syslog->toprint++;
+		syslog->toprint %= 0x40;
 		schedule_work(&syslog->work_message);
 		mbox_copy_and_send(syslog->chan, msg);
 	} else {
