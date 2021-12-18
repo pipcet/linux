@@ -700,11 +700,11 @@
 				rprocs = <&dcp_asc>;
 			};
 			dcp_asc_dcp: dcp_asc_dcp@37 {
-				compatible = "apple,apple-asc-dcp", "apple,apple-asc-system-endpoint";
+				compatible = "apple,apple-asc-dcp";
 				mboxes = <&dcp_asc 0x37>;
 				rprocs = <&dcp_asc>;
 				#mbox-cells = <1>; /* could be 0, but requires extra code */
-				iommus = <&dcp_dart 15>;
+				iommus = <&dcp_dart 0>;
 			};
 		};
 
