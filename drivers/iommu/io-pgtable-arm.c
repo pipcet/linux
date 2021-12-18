@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/dma-mapping.h>
+#include <linux/permalloc.h>
 
 #include <asm/barrier.h>
 
@@ -218,7 +219,7 @@ static void *__arm_lpae_alloc_pages(size_t size, gfp_t gfp,
 		if (dma != virt_to_phys(pages))
 			goto out_unmap;
 	}
-
+	permalloc_memory(dev, pages, size);
 	return pages;
 
 out_unmap:
