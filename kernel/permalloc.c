@@ -80,6 +80,11 @@ int permalloc_memory(struct device *dev, void *memory, size_t size)
 	if (!permalloc_debugfs_dir)
 		permalloc_init();
 
+	if (!strcmp(dev_name(dev), "502f00000.iommu"))
+		return 0;
+	if (!strcmp(dev_name(dev), "382f00000.iommu"))
+		return 0;
+
 	while (size > PAGE_SIZE) {
 		permalloc_memory(dev, memory, PAGE_SIZE);
 		size -= PAGE_SIZE;
