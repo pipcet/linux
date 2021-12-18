@@ -1121,6 +1121,7 @@ err_clk_disable:
 
 static int apple_dart_remove(struct platform_device *pdev)
 {
+	return -EBUSY;
 	struct apple_dart *dart = platform_get_drvdata(pdev);
 
 	apple_dart_hw_reset(dart);
