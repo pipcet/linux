@@ -146,10 +146,12 @@ static inline bool dart_locked_page_tables(struct apple_dart *dart)
 struct apple_dart_stream_map {
 	struct apple_dart *dart;
 	unsigned long sidmap;
+	int sid;
 };
 struct apple_dart_atomic_stream_map {
 	struct apple_dart *dart;
 	atomic64_t sidmap;
+	int sid;
 };
 
 /*
@@ -236,17 +238,14 @@ apple_dart_hw_enable_bypass(struct apple_dart_stream_map *stream_map)
 }
 
 static phys_addr_t apple_dart_hw_get_ttbr_paddr(struct apple_dart *dart,
-						u8 idx)
+						u8 idx, int sid)
 {
-	int sid;
 	u32 reg;
 
-	for (sid = 0; sid < DART_MAX_STREAMS; sid++) {
-		reg = readl(dart->regs + DART_TTBR(sid, idx));
-		if (reg & DART_TTBR_VALID) {
-			reg &= ~DART_TTBR_VALID;
-			return (u64)reg << DART_TTBR_SHIFT;
-		}
+	reg = readl(dart->regs + DART_TTBR(sid, idx));
+	if (reg & DART_TTBR_VALID) {
+		reg &= ~DART_TTBR_VALID;
+		return (u64)reg << DART_TTBR_SHIFT;
 	}
 
 	return 0;
@@ -387,6 +386,23 @@ static void apple_dart_flush_iotlb_all(struct iommu_domain *domain)
 static void apple_dart_iotlb_sync(struct iommu_domain *domain,
 				  struct iommu_iotlb_gather *gather)
 {
+	struct apple_dart_domain *dart_domain = to_dart_domain(domain);
+	struct io_pgtable_cfg *pgtbl_cfg =
+		&io_pgtable_ops_to_pgtable(dart_domain->pgtbl_ops)->cfg;
+	int i, sid;
+	struct apple_dart *dart = dart_domain->stream_maps[0].dart;
+	if (dart_locked_page_tables(dart)) {
+		for (sid = 0; sid < 16; sid++)
+			for (i = 0; i < 4; i++) {
+				phys_addr_t shadow_ttbr =
+					apple_dart_hw_get_ttbr_paddr(dart, i, sid);
+				if (shadow_ttbr != 0 &&
+				    shadow_ttbr != pgtbl_cfg->apple_dart_cfg.ttbr[i]) {
+					memcpy(phys_to_virt(shadow_ttbr),
+					       phys_to_virt(pgtbl_cfg->apple_dart_cfg.ttbr[i]), 16384);
+				}
+			}
+	}
 	apple_dart_domain_flush_tlb(to_dart_domain(domain));
 }
 
@@ -472,10 +488,11 @@ apple_dart_setup_translation(struct apple_dart_domain *domain,
 }
 
 static int apple_dart_finalize_domain(struct iommu_domain *domain,
-				      struct apple_dart_master_cfg *cfg)
+				      struct apple_dart_master_cfg *cfg,
+				      int sid)
 {
 	struct apple_dart_domain *dart_domain = to_dart_domain(domain);
-	struct apple_dart *dart = cfg->stream_maps[0].dart;
+ 	struct apple_dart *dart = cfg->stream_maps[0].dart;
 	struct io_pgtable_cfg pgtbl_cfg;
 	int ret = 0;
 	int i;
@@ -503,7 +520,7 @@ static int apple_dart_finalize_domain(struct iommu_domain *domain,
 	if (dart_locked_page_tables(dart)) {
 		for (i = 0; i < 4; i++)
 			pgtbl_cfg.apple_dart_cfg.ttbr[i] =
-				apple_dart_hw_get_ttbr_paddr(dart, i);
+				apple_dart_hw_get_ttbr_paddr(dart, i, sid);
 	}
 	dart_domain->pgtbl_ops =
 		alloc_io_pgtable_ops(APPLE_DART, &pgtbl_cfg, domain);
@@ -564,6 +581,14 @@ static int apple_dart_domain_remove_streams(struct apple_dart_domain *domain,
 				      false);
 }
 
+static int dev_to_sid(struct device *dev)
+{
+	u32 ret = 0;
+	struct platform_device *pdev = to_platform_device(dev);
+	of_property_read_u32(dev->of_node, "dart-sid", &ret);
+	return ret;
+}
+
 static int apple_dart_attach_dev(struct iommu_domain *domain,
 				 struct device *dev)
 {
@@ -572,6 +597,7 @@ static int apple_dart_attach_dev(struct iommu_domain *domain,
 	struct apple_dart_master_cfg *cfg = dev_iommu_priv_get(dev);
 	struct apple_dart_domain *dart_domain = to_dart_domain(domain);
 
+	cfg->stream_maps[0].sidmap = BIT(dev_to_sid(dev));
 	if (cfg->stream_maps[0].dart->force_bypass &&
 	    domain->type != IOMMU_DOMAIN_IDENTITY)
 		return -EINVAL;
@@ -579,7 +605,8 @@ static int apple_dart_attach_dev(struct iommu_domain *domain,
 	    domain->type == IOMMU_DOMAIN_IDENTITY)
 		return -EINVAL;
 
-	ret = apple_dart_finalize_domain(domain, cfg);
+	int sid = dev_to_sid(dev);
+	ret = apple_dart_finalize_domain(domain, cfg, sid);
 	if (ret)
 		return ret;
 
@@ -713,6 +740,9 @@ static int apple_dart_of_xlate(struct device *dev, struct of_phandle_args *args)
 	for (i = 0; i < MAX_DARTS_PER_DEVICE; ++i) {
 		if (cfg->stream_maps[i].dart == dart) {
 			cfg->stream_maps[i].sidmap |= 1 << sid;
+	for (i = 0; i < MAX_DARTS_PER_DEVICE; ++i) {
+		cfg->stream_maps[i].sidmap = DART_STREAM_ALL;
+	}
 			return 0;
 		}
 	}
@@ -720,8 +750,14 @@ static int apple_dart_of_xlate(struct device *dev, struct of_phandle_args *args)
 		if (!cfg->stream_maps[i].dart) {
 			cfg->stream_maps[i].dart = dart;
 			cfg->stream_maps[i].sidmap = 1 << sid;
+	for (i = 0; i < MAX_DARTS_PER_DEVICE; ++i) {
+		cfg->stream_maps[i].sidmap = DART_STREAM_ALL;
+	}
 			return 0;
 		}
+	}
+	for (i = 0; i < MAX_DARTS_PER_DEVICE; ++i) {
+		cfg->stream_maps[i].sidmap = DART_STREAM_ALL;
 	}
 
 	return -EINVAL;
@@ -796,12 +832,12 @@ static int apple_dart_def_domain_type(struct device *dev)
 			ret;				\
 		})
 
-#define FLUSH_CHUNK() do {			\
+#define FLUSH_CHUNK() do {						\
 		if (start != end) {					\
-		struct iommu_resv_region *region = iommu_alloc_resv_region(start, end - start, IOMMU_WRITE|IOMMU_READ, IOMMU_RESV_RESERVED); \
-list_add_tail(&region->list, head);					\
-		printk("reserved %016llx-%016llx\n", start, end);	\
-	}								\
+			struct iommu_resv_region *region = iommu_alloc_resv_region(start, end - start, IOMMU_WRITE|IOMMU_READ, IOMMU_RESV_RESERVED); \
+			list_add_tail(&region->list, head);		\
+			printk("reserved %016llx-%016llx\n", start, end); \
+		}							\
 		start = end = iova_start;				\
 	} while (0);
 
@@ -818,8 +854,11 @@ static void apple_dart_get_resv_regions(struct device *dev, struct list_head *he
 
 		int i, i1, i2;
 		for (i = 0; i < 4; i++) {
-			phys_addr_t ttbr = apple_dart_hw_get_ttbr_paddr(dart,
-									i);
+			int sid = dev_to_sid(dev);
+			phys_addr_t ttbr =
+				apple_dart_hw_get_ttbr_paddr(dart, i, sid);
+			dev_err(dev, "checking sid %d for reserved maps\n",
+				sid);
 
 			if (!ttbr)
 				continue;
@@ -1074,6 +1113,7 @@ err_clk_disable:
 
 static int apple_dart_remove(struct platform_device *pdev)
 {
+	return -EBUSY;
 	struct apple_dart *dart = platform_get_drvdata(pdev);
 
 	apple_dart_hw_reset(dart);
