@@ -47,12 +47,10 @@ static void apple_panic_allocator_func(struct work_struct *work)
 #if 1
 	panic->buf_iova = U36_MAX & panic->payload;
 	if ((panic->buf_iova & 0xf00000000) == 0xf00000000) {
-		/* Already mapped, and probably locked. Reuse the buffer. */
-		printk("pa %016llx\n", 0xbe6194000 + panic->buf_iova - 0xf00000000);
-		panic->buf = devm_memremap(panic->dev, 0xbe6194000 + panic->buf_iova - 0xf00000000, 0x4000, MEMREMAP_WB);
+		printk("iova %016llx\n", panic->buf_iova);
+		panic->buf = (void *)panic;
 		response.payload &= ~U36_MAX;
 		response.payload |= panic->buf_iova;
-		printk("va %016llx\n", (u64)panic->buf);
 	} else if (panic->buf_iova) {
 		/* Already mapped, and probably locked. Reuse the buffer. */
 		printk("pa %016llx\n", panic->buf_iova);
@@ -89,12 +87,16 @@ static void apple_panic_panic_func(struct work_struct *work)
 						 work);
 	static char pbuf[2048];
 	int i;
-	for (i = 0; i < 2048; i++) {
-		pbuf[i] = readb(panic->buf + i);
-	}
+	if (panic->buf == (void *)panic) {
+		dev_err(panic->dev, "crashed!\n");
+	} else {
+		for (i = 0; i < 2048; i++) {
+			pbuf[i] = readb(panic->buf + i);
+		}
 
-	print_hex_dump(KERN_EMERG, "crash:", DUMP_PREFIX_NONE,
-		       16, 1, pbuf, 128, true);
+		print_hex_dump(KERN_EMERG, "crash:", DUMP_PREFIX_NONE,
+			       16, 1, pbuf, 128, true);
+	}
 	rproc_report_crash(panic->rproc, RPROC_FATAL_ERROR);
 }
 
