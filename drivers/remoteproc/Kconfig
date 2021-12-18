@@ -386,6 +386,15 @@ config APPLE_M1_ASC_IOREPORT
 
 	  Say Y here if you see this option.
 
+config APPLE_M1_ASC_OSLOG
+        tristate "Apple M1 ASC OS log endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	default APPLE_M1_ASC
+	help
+	  (This driver is split for debugging purposes).
+
+	  Say Y here if you see this option.
+
 config APPLE_M1_ASC_SMC
         tristate "Apple M1 SMC endpoint support"
 	depends on ARCH_APPLE && OF
