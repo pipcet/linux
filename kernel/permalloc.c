@@ -5,11 +5,11 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 
+static bool permalloc_initialized;
 static struct list_head permallocs;
-
 static struct dentry *permalloc_debugfs_dir;
 
-static int permalloc_debugfs_show(struct seq_file *s, void *ptr)
+static int permallocs_debugfs_show(struct seq_file *s, void *ptr)
 {
 	struct permalloc_entry *entry;
 
@@ -19,16 +19,35 @@ static int permalloc_debugfs_show(struct seq_file *s, void *ptr)
 
 	return 0;
 }
+DEFINE_SHOW_ATTRIBUTE(permallocs_debugfs);
+
+static int permalloc_debugfs_show(struct seq_file *s, void *ptr)
+{
+	struct permalloc_entry *entry;
+
+	list_for_each_entry(entry, &permallocs, list) {
+		seq_printf(s, "%s\n", entry->str2);
+	}
+
+	return 0;
+}
 DEFINE_SHOW_ATTRIBUTE(permalloc_debugfs);
 
-static void permalloc_init(void)
+void permalloc_init(void)
 {
-	INIT_LIST_HEAD(&permallocs);
+	if (!permalloc_initialized)
+		INIT_LIST_HEAD(&permallocs);
+
+	permalloc_initialized = true;
 
 	permalloc_debugfs_dir = debugfs_create_dir("permallocs", NULL);
+	if (IS_ERR(permalloc_debugfs_dir))
+		return;
 
-	debugfs_create_file("permallocs", 0400, permalloc_debugfs_dir, NULL, &permalloc_debugfs_fops);
+	debugfs_create_file("permallocs", 0400, permalloc_debugfs_dir, NULL, &permallocs_debugfs_fops);
+	debugfs_create_file("permalloc", 0400, permalloc_debugfs_dir, NULL, &permalloc_debugfs_fops);
 }
+EXPORT_SYMBOL(permalloc_init);
 
 int permalloc_bool(struct device *dev, const char *name)
 {
@@ -45,6 +64,7 @@ int permalloc_bool(struct device *dev, const char *name)
 
 	entry->dev = dev;
 	entry->str = str;
+	entry->str2 = str;
 	list_add(&entry->list, &permallocs);
 
 	return 0;
@@ -54,7 +74,7 @@ EXPORT_SYMBOL(permalloc_bool);
 int permalloc_memory(struct device *dev, void *memory, size_t size)
 {
 	phys_addr_t phys_addr;
-	char *str;
+	char *str, *str2;
 	struct permalloc_entry *entry;
 
 	if (!permalloc_debugfs_dir)
@@ -70,6 +90,9 @@ int permalloc_memory(struct device *dev, void *memory, size_t size)
 	str = devm_kasprintf(dev, GFP_KERNEL, "reserved: <%08llx %08llx %08llx %08llx>;",
 			     (u64)(phys_addr & U32_MAX), ((u64)phys_addr >> 32),
 			     (u64)(size & U32_MAX), (u64)0);
+	str2 = devm_kasprintf(dev, GFP_KERNEL, "reserved: <%08llx %08llx %08llx %08llx> for %s",
+			     (u64)(phys_addr & U32_MAX), ((u64)phys_addr >> 32),
+			      (u64)(size & U32_MAX), (u64)0, dev_name(dev));
 	entry = kzalloc(sizeof *entry, GFP_KERNEL);
 
 	if (!str || !entry)
@@ -77,6 +100,7 @@ int permalloc_memory(struct device *dev, void *memory, size_t size)
 
 	entry->dev = dev;
 	entry->str = str;
+	entry->str2 = str2;
 	list_add(&entry->list, &permallocs);
 
 	return 0;
@@ -102,6 +126,7 @@ int permalloc_spin_table(phys_addr_t phys_addr)
 
 	entry->dev = NULL;
 	entry->str = str;
+	entry->str2 = str;
 	list_add(&entry->list, &permallocs);
 
 	return 0;
@@ -126,6 +151,7 @@ int permalloc_spin_code(phys_addr_t phys_addr)
 
 	entry->dev = NULL;
 	entry->str = str;
+	entry->str2 = str;
 	list_add(&entry->list, &permallocs);
 
 	return 0;
