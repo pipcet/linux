@@ -224,8 +224,26 @@ EXPORT_SYMBOL(set_fb_physical_address);
 static void __init fixup_fdt(u64 bootargs_phys, u64 base) __attribute__((__noinline__));
 static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 {
-	struct apple_bootargs *bootargs =
+	struct apple_bootargs *orig_bootargs =
 		fixmap_remap_bootargs(bootargs_phys, PAGE_KERNEL);
+	struct apple_bootargs mangled_bootargs;
+	struct apple_bootargs *bootargs = orig_bootargs;
+	bool framebuffer_enabled = bootargs->framebuffer.phys_base != 0;
+	memcpy(&mangled_bootargs, orig_bootargs, sizeof(mangled_bootargs));
+	if (bootargs->framebuffer.height <= 1024 ||
+	    bootargs->framebuffer.width <= 1024)
+		framebuffer_enabled = false;
+
+	if (!framebuffer_enabled) {
+#define FB_SIZE (32 << 20) /* enough for any red-blooded 4k screen */
+#define MEMTOP (0x800000000 + (bootargs->mem_size))
+		bootargs->framebuffer.phys_base = MEMTOP - FB_SIZE;
+		bootargs->mem_size -= FB_SIZE;
+		framebuffer_physical_address = bootargs->framebuffer.phys_base;
+		bootargs->framebuffer.height = 2160/2;
+		bootargs->framebuffer.width = 3840/2;
+		bootargs->framebuffer.stride = 3840/2*4;
+	}
 
 	FDT_INIT();
 }
