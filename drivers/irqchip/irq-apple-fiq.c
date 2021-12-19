@@ -221,24 +221,24 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 
 	if (read_sysreg_s(SYS_IMP_APL_IPI_SR_EL1) & IPI_SR_PENDING) {
 		write_sysreg_s(IPI_SR_PENDING, SYS_IMP_APL_IPI_SR_EL1);
-		handle_domain_irq(ic->ipi_domain, 0, regs);
+		generic_handle_domain_irq(ic->ipi_domain, 0);
 	}
 
 	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
 
-		handle_domain_irq(ic->domain, FIQ_TMR_EL0_PHYS, regs);
+		generic_handle_domain_irq(ic->domain, FIQ_TMR_EL0_PHYS);
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
-		handle_domain_irq(ic->domain, FIQ_TMR_EL0_VIRT, regs);
+		generic_handle_domain_irq(ic->domain, FIQ_TMR_EL0_VIRT);
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_P) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTP_CTL_EL02)))
-			handle_domain_irq(ic->domain, FIQ_TMR_EL02_PHYS, regs);
+			generic_handle_domain_irq(ic->domain, FIQ_TMR_EL02_PHYS);
 
 		if ((enabled & VM_TMR_FIQ_ENABLE_V) &&
 		    TIMER_FIRING(read_sysreg_s(SYS_CNTV_CTL_EL02)))
-			handle_domain_irq(fiq_irqc->domain, FIQ_TMR_EL02_VIRT, regs);
+			generic_handle_domain_irq(fiq_irqc->domain, FIQ_TMR_EL02_VIRT);
 	}
 
 	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
