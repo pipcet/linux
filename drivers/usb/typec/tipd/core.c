@@ -899,7 +899,6 @@ static int tps6598x_probe(struct i2c_client *client)
 err_role_put:
 	if (tps->role_sw)
 		usb_role_switch_put(tps->role_sw);
-err_fwnode_put:
 	fwnode_handle_put(fwnode);
 
 	return ret;
