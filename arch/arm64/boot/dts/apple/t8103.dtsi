@@ -778,7 +778,7 @@
 			};
 		};
 		ans2_hdd: nvme@27bcc0000 {
-                        compatible = "apple,t8103-ans-nvme";
+			compatible = "apple,t8103-ans-nvme", "apple,nvme-ans2";
                         reg = <0x2 0x7bcc0000 0x0 0x40000>;
                         interrupt-parent = <&aic>;
                         interrupts = <AIC_IRQ 590 IRQ_TYPE_LEVEL_HIGH>;
