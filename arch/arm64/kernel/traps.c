@@ -907,7 +907,12 @@ void __noreturn arm64_serror_panic(struct pt_regs *regs, u32 esr)
 	if (regs)
 		__show_regs(regs);
 
-	nmi_panic(regs, "Asynchronous SError Interrupt");
+	/* Commented for debugging. This will result in unpredictable
+	 * system behavior after an SError, in theory; in practice,
+	 * SErrors are usually just the consequence of our chicken bits
+	 * being set to produce them in preference to recoverable
+	 * errors. */
+	//nmi_panic(regs, "Asynchronous SError Interrupt");
 
 	cpu_park_loop();
 	unreachable();
