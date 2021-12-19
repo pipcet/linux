@@ -144,16 +144,6 @@ enum nvme_quirks {
 	 * encoding the generation sequence number.
 	 */
 	NVME_QUIRK_SKIP_CID_GEN			= (1 << 17),
-
-	/*
-	 * MMIO based hardware that is not on a PCI bus
-	 */
-	NVME_QUIRK_PLATFORM_DEVICE		= (1 << 17),
-
-	/*
-	 * Apple's ANS2 controller is special in many ways...
-	 */
-	NVME_QUIRK_APPLE_ANS2			= (1 << 18),
 };
 
 /*
