@@ -418,8 +418,8 @@ static int xhci_try_enable_msi(struct usb_hcd *hcd)
 	 * Some Fresco Logic host controllers advertise MSI, but fail to
 	 * generate interrupts.  Don't even try to enable MSI.
 	 */
-	if (xhci->quirks & XHCI_BROKEN_MSI)
-		goto legacy_irq;
+	//if (xhci->quirks & XHCI_BROKEN_MSI)
+	//goto legacy_irq;
 
 	/* unregister the legacy interrupt */
 	if (hcd->irq)
