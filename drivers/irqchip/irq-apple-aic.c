@@ -163,7 +163,7 @@ static void __exception_irq_entry aic_handle_irq(struct pt_regs *regs)
 		irq = FIELD_GET(AIC_EVENT_NUM, event);
 
 		if (type == AIC_EVENT_TYPE_HW)
-			handle_domain_irq(ic->hw_domain, irq, regs);
+			generic_handle_domain_irq(ic->hw_domain, irq);
 		else if (type == AIC_EVENT_TYPE_IPI)
 			aic_handle_ipi(0 /* irq */, regs);
 		else if (event != 0)
@@ -353,7 +353,7 @@ static void aic_handle_ipi(int index, struct pt_regs *regs)
 	aic_ic_write(ic, AIC_IPI_ACK,
 		     aic_ipi_number(irq_domain_get_irq_data(domain, index)));
 
-	handle_domain_irq(domain, index, regs);
+	generic_handle_domain_irq(domain, index);
 
 	/*
 	 * No ordering needed here; at worst this just changes the timing of
