@@ -14,13 +14,12 @@
 
 #include <asm/cpu_ops.h>
 #include <asm/errno.h>
+#include <asm/kexec.h>
 #include <asm/memory.h>
 #include <asm/mmu.h>
 #include <asm/mmu_context.h>
 #include <asm/smp_plat.h>
 #include <asm/io.h>
-
-#include "cpu-reset.h"
 
 #define MAGIC_UNLOCK 0xc5acce55 /* See ARM CoreSightArchitecture Specification v3.0 ? */
 
@@ -195,7 +194,7 @@ static int cpu_apple_disable(unsigned int cpu)
 
 static void cpu_apple_die(unsigned int cpu)
 {
-	cpu_soft_restart(spin_code, __pa(&spin_table[cpu]), 0, 0);
+	cpu_soft_restart(0, spin_code, __pa(&spin_table[cpu]), 0, 0);
 }
 
 static int cpu_apple_kill(unsigned int cpu)
