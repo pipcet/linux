@@ -343,6 +343,7 @@ static int apple_asc_attach(struct rproc *rproc)
 	u64 payload = 0;
 	u32 endpoint_mask[8];
 	bool last;
+	int trycount = 10;
 
 	apple_asc_lock_exclusively(&asc->rproc);
 	switch (asc->state) {
@@ -398,6 +399,10 @@ static int apple_asc_attach(struct rproc *rproc)
 			if ((payload & EP0_TYPE_MASK) == EP0_TYPE_HELLO)
 				goto hello;
 			printk("unexpected message %016llx\n", payload);
+			if (trycount-- <= 0) {
+				ret = -ETIME;
+				goto out;
+			}
 			continue;
 		}
 
