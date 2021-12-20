@@ -501,7 +501,7 @@ static int of_irq_parse_pci(const struct pci_dev *pdev, struct of_phandle_args *
 	}
 
 	out_irq->np = ppnode;
-	out_irq->args_count = 3;
+	out_irq->args_count = 1;
 	out_irq->args[0] = pin;
 	laddr[0] = cpu_to_be32((pdev->bus->number << 16) | (pdev->devfn << 8));
 	laddr[1] = laddr[2] = cpu_to_be32(0);
