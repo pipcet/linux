@@ -23,6 +23,7 @@
 #include <linux/pci-ecam.h>
 #include <linux/iopoll.h>
 #include <linux/gpio/consumer.h>
+#include <dt-bindings/interrupt-controller/apple-aic.h>
 
 #define CORE_RC_PHYIF_CTL		0x00024
 #define   CORE_RC_PHYIF_CTL_RUN		BIT(0)
@@ -188,7 +189,7 @@ static int apple_msi_domain_alloc(struct irq_domain *domain, unsigned int virq,
 
 	fwspec.fwnode = domain->parent->fwnode;
 	fwspec.param_count = 3;
-	fwspec.param[0] = 0;
+	fwspec.param[0] = AIC_IRQ;
 	fwspec.param[1] = hwirq + pcie->msi_base;
 	fwspec.param[2] = IRQ_TYPE_EDGE_RISING;
 
