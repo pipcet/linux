@@ -473,9 +473,8 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	info = aic_ic_read(irqc, AIC_INFO);
 	irqc->nr_hw = FIELD_GET(AIC_INFO_NR_HW, info);
 
-	irqc->hw_domain = irq_domain_create_linear(of_node_to_fwnode(node),
-						   irqc->nr_hw,
-						   &aic_irq_domain_ops, irqc);
+	irqc->hw_domain = irq_domain_create_tree(of_node_to_fwnode(node),
+						 &aic_irq_domain_ops, irqc);
 	if (WARN_ON(!irqc->hw_domain)) {
 		iounmap(irqc->base);
 		kfree(irqc);
