@@ -1037,12 +1037,14 @@ static int apple_dart_probe(struct platform_device *pdev)
 		return just_sart(pdev);
 	}
 
-	if (((u64)res->start & 0xf00000000) == 0x600000000) {
+	if (((u64)res->start & 0xffe000000) == 0x682000000) {
 		if (count++ < 10)
 			return -ENODEV;
-		dart->regs = devm_ioremap_np(dev, res->start, resource_size(res));
-	} else
-		dart->regs = devm_ioremap_np(dev, res->start, resource_size(res));
+	}
+	dart->regs = devm_ioremap_np(dev, res->start, resource_size(res));
+	if (dart->regs == NULL) {
+		dart->regs = devm_ioremap_resource(dev, res);
+	}
 	if (of_property_read_bool(pdev->dev.of_node, "fake-locked"))
 		dart->fake_locked = 1;
 
