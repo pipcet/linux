@@ -192,12 +192,12 @@ static int ep0_send(struct apple_asc *asc, u64 payload)
 
 static int ep0_recv(struct apple_asc *asc, u64 *payload)
 {
-	int ret;
+	unsigned long ret;
 
 	ret = wait_for_completion_timeout(&asc->rx_complete, ASC_TIMEOUT_MSEC);
 
-	if (ret < 0)
-		return ret;
+	if (ret == 0)
+		return -ETIME;
 
 	reinit_completion(&asc->rx_complete);
 	*payload = asc->ep0_payload;
@@ -316,9 +316,10 @@ static int apple_asc_startup(struct mbox_chan *chan)
 
 	/* XXX, obviously */
 	if (index >= 0x20 && index != 0x37) {
+		unsigned long ret;
 		/* XXX one second is too long, obviously, but .... */
 		ret = wait_for_completion_timeout(&asc->pwrack_complete, HZ);
-		if (ret <= 0)
+		if (ret == 0)
 			return -EPROBE_DEFER;
 	}
 
