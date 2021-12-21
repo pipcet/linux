@@ -879,12 +879,14 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 	apple_fw_call(dcp, &a411.header, STREAM_COMMAND);
 	apple_fw_call(dcp, &a468.header, STREAM_COMMAND);
 
-	get_fb_physical_address(&fb_width, fb_height);
+	get_fb_physical_address(&fb_width, &fb_height);
 
-	if ((fb_width != 3840 || fb_height != 2160) &&
-	    (fb_width != 1920 || fb_height != 1080))
-		return 0;
-	apple_dcp_init_4k(dcp);
+	if (fb_width == 3840 && fb_height == 2160)
+		apple_dcp_init_4k(dcp);
+
+	if (fb_width == 1920 && fb_height == 1080)
+		apple_dcp_init_4k(dcp);
+
 	return 0;
 }
 
