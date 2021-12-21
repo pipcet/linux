@@ -449,6 +449,8 @@ static void simplefb_regulators_enable(struct simplefb_par *par,
 static void simplefb_regulators_destroy(struct simplefb_par *par) { }
 #endif
 
+extern void set_fb_physical_address(u64, u64, u64);
+
 static int simplefb_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -498,7 +500,6 @@ static int simplefb_probe(struct platform_device *pdev)
 	info->fix.smem_start = mem->start;
 	info->fix.smem_len = resource_size(mem);
 	info->fix.line_length = params.stride;
-	extern void set_fb_physical_address(u64, u64, u64);
 	set_fb_physical_address(info->fix.smem_start, params.width, params.height);
 
 	info->var = simplefb_var;
