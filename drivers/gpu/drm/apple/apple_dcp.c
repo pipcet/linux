@@ -135,7 +135,7 @@ struct apple_dcp {
 	void __iomem *regs;
 	dma_addr_t dummy_buffer;
 
-	void *va_fb;
+	/* void *va_fb; */
 	dma_addr_t dva_display;
 	dma_addr_t dva_framebuffer;
 
@@ -179,7 +179,7 @@ static void callback_device_memory(struct apple_dcp *dcp, struct apple_dcp_msg *
 	memcpy(msg->data, out, sizeof(out));
 }
 
-static u64 apple_get_fb_dva(struct apple_dcp *dcp)
+static u64 apple_get_fb_dva(struct apple_dcp *dcp, u64 *width, u64 *height)
 {
 	struct device *dev = dcp->fb;
 	static dma_addr_t dma_addr;
@@ -190,12 +190,12 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 	if (!dma_addr) {
 		struct iommu_domain *domain;
 		size_t off;
-		extern u64 get_fb_physical_address(void);
-		u64 base = get_fb_physical_address();
+		extern u64 get_fb_physical_address(u64 *, u64 *);
+		u64 base = get_fb_physical_address(width, height);
 		struct iommu_iotlb_gather gather = {};
 		dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		/* XXX work out why dma_alloc_coherent doesn't work here. */
-		va = dma_alloc_noncoherent(dev, 32<<20, &dma_addr, DMA_TO_DEVICE, GFP_KERNEL);
+		/* va = dma_alloc_noncoherent(dev, 32<<20, &dma_addr, DMA_TO_DEVICE, GFP_KERNEL); */
 		domain = iommu_get_domain_for_dev(dcp->display);
 		for (off = 0; off < (32<<20); off += 16384)
 			iommu_map(domain, 0xa0000000+off, base+off, 16384, IOMMU_READ|IOMMU_WRITE);
@@ -208,7 +208,7 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp)
 		if (0)
 			*(u64 *)phys_to_virt(0x9fff78280) =
 				*(u64 *)phys_to_virt(0x9fff48280);
-		dcp->va_fb = va;
+		/* dcp->va_fb = va; */
 	}
 	return dma_addr;
 }
@@ -780,31 +780,34 @@ static int apple_dcp_init_4k(struct apple_dcp *dcp)
 	a407->in.flags = 0x0000010000000000;
 	while (delay <= 3000) {
 		u32 swap_id;
+		u64 width, height;
 		apple_fw_call(dcp, &a407->header, STREAM_COMMAND);
 		swap_id = a407->out.swap_id;
 		msleep(delay);
+		a408->in.surf_addr[0] = apple_get_fb_dva(dcp,
+							 &width,
+							 &height);
 		a408->in.swaprec.flags[0] = 0x861202;
 		a408->in.swaprec.flags[2] = 0x04;
 		a408->in.swaprec.swap_id = swap_id;
 		a408->in.swaprec.surf_ids[0] = surface_id;
-		a408->in.swaprec.src_rect[0].width = 1920;
-		a408->in.swaprec.src_rect[0].height = 1080;
+		a408->in.swaprec.src_rect[0].width = width;
+		a408->in.swaprec.src_rect[0].height = height;
 		a408->in.swaprec.surf_flags[0] = 1;
 		a408->in.swaprec.dst_rect[0].width = 3840;
 		a408->in.swaprec.dst_rect[0].height = 2160;
 		a408->in.swaprec.swap_enabled = 0x80000007;
 		a408->in.swaprec.swap_completed = 0x80000007;
-		a408->in.surf_addr[0] = apple_get_fb_dva(dcp);
 		a408->in.surface[0].format = 0x42475241;
 		a408->in.surface[0].unk2[0] = 0x0d;
 		a408->in.surface[0].unk2[1] = 0x01;
-		a408->in.surface[0].stride = 1920 * 4;
+		a408->in.surface[0].stride = width * 4;
 		a408->in.surface[0].pix_size = 4;
 		a408->in.surface[0].pel_w = 1;
 		a408->in.surface[0].pel_h = 1;
-		a408->in.surface[0].width = 1920;
-		a408->in.surface[0].height = 1080;
-		a408->in.surface[0].buf_size = 1920 * 1080 * 4;
+		a408->in.surface[0].width = width;
+		a408->in.surface[0].height = height;
+		a408->in.surface[0].buf_size = width * height * 4;
 		a408->in.surface[0].surface_id = surface_id;
 		a408->in.surface[0].has_comp = 1;
 		a408->in.surface[0].has_planes = 1;
