@@ -246,7 +246,8 @@ static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 #define MEMTOP (0x800000000 + (bootargs->mem_size))
 		bootargs->framebuffer.phys_base = MEMTOP - FB_SIZE;
 		bootargs->mem_size -= FB_SIZE;
-		framebuffer_physical_address = bootargs->framebuffer.phys_base;
+		set_fb_physical_address(bootargs->framebuffer.phys_base,
+					3840, 2160);
 		bootargs->framebuffer.height = 2160;
 		bootargs->framebuffer.width = 3840;
 		bootargs->framebuffer.stride = 3840*4;
