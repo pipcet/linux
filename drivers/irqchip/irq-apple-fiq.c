@@ -192,10 +192,6 @@ static void fiq_ipi_unmask(struct irq_data *d)
 	/* The vIPI layer does not assume IPIs are masked. */
 }
 
-static void fiq_ipi_eoi(struct irq_data *d)
-{
-}
-
 #define TIMER_FIRING(x)                                                        \
 	(((x) & (ARCH_TIMER_CTRL_ENABLE | ARCH_TIMER_CTRL_IT_MASK |            \
 		 ARCH_TIMER_CTRL_IT_STAT)) ==                                  \
@@ -386,9 +382,7 @@ static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 static int ipi_domain_alloc(struct irq_domain *domain, unsigned int virq,
 			    unsigned int nr_irqs, void *arg)
 {
-	unsigned int type = IRQ_TYPE_NONE;
-	irq_hw_number_t hwirq;
-	int i, ret;
+	int i;
 
 	for (i = 0; i < nr_irqs; i++) {
 		irq_set_percpu_devid(virq + i);
