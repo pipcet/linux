@@ -179,6 +179,8 @@ static void callback_device_memory(struct apple_dcp *dcp, struct apple_dcp_msg *
 	memcpy(msg->data, out, sizeof(out));
 }
 
+extern u64 get_fb_physical_address(u64 *, u64 *);
+
 static u64 apple_get_fb_dva(struct apple_dcp *dcp, u64 *width, u64 *height)
 {
 	struct device *dev = dcp->fb;
@@ -190,7 +192,6 @@ static u64 apple_get_fb_dva(struct apple_dcp *dcp, u64 *width, u64 *height)
 	if (!dma_addr) {
 		struct iommu_domain *domain;
 		size_t off;
-		extern u64 get_fb_physical_address(u64 *, u64 *);
 		u64 base = get_fb_physical_address(width, height);
 		struct iommu_iotlb_gather gather = {};
 		dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
@@ -847,6 +848,7 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 	struct apple_dcp_msg_set_power_state a468 = {
 		.in = { 1, },
 	};
+	u64 fb_width, fb_height;
 
 	INIT_APPLE_DCP_MSG(&a000, "A000");
 	INIT_APPLE_DCP_MSG(&a029, "A029");
@@ -877,6 +879,11 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 	apple_fw_call(dcp, &a411.header, STREAM_COMMAND);
 	apple_fw_call(dcp, &a468.header, STREAM_COMMAND);
 
+	get_fb_physical_address(&fb_width, fb_height);
+
+	if ((fb_width != 3840 || fb_height != 2160) &&
+	    (fb_width != 1920 || fb_height != 1080))
+		return 0;
 	apple_dcp_init_4k(dcp);
 	return 0;
 }
