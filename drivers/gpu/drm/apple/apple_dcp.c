@@ -881,7 +881,7 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 
 	get_fb_physical_address(&fb_width, fb_height);
 
-	if ((fb_width != 3840 || fb_height != 2160) &&
+	if ((fb_width != 3840 || fb_height != 2160) ||
 	    (fb_width != 1920 || fb_height != 1080))
 		return 0;
 	apple_dcp_init_4k(dcp);
