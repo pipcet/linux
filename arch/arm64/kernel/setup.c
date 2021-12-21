@@ -205,18 +205,25 @@ struct apple_bootargs {
 	u64 mem_size_actual;
 };
 
-u64 framebuffer_physical_address;
+static u64 framebuffer_physical_address;
+static u64 framebuffer_width, framebuffer_height;
 
-u64 get_fb_physical_address(void)
+u64 get_fb_physical_address(u64 *width, u64 *height)
 {
 	printk("returning %016llx\n", framebuffer_physical_address);
+	if (width)
+		*width = framebuffer_width;
+	if (height)
+		*height = framebuffer_height;
 	return framebuffer_physical_address;
 }
 EXPORT_SYMBOL(get_fb_physical_address);
 
-void set_fb_physical_address(u64 addr)
+void set_fb_physical_address(u64 addr, u64 width, u64 height)
 {
 	framebuffer_physical_address = addr;
+	framebuffer_width = width;
+	framebuffer_height = height;
 }
 EXPORT_SYMBOL(set_fb_physical_address);
 
@@ -240,9 +247,9 @@ static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 		bootargs->framebuffer.phys_base = MEMTOP - FB_SIZE;
 		bootargs->mem_size -= FB_SIZE;
 		framebuffer_physical_address = bootargs->framebuffer.phys_base;
-		bootargs->framebuffer.height = 2160/2;
-		bootargs->framebuffer.width = 3840/2;
-		bootargs->framebuffer.stride = 3840/2*4;
+		bootargs->framebuffer.height = 2160;
+		bootargs->framebuffer.width = 3840;
+		bootargs->framebuffer.stride = 3840*4;
 	}
 
 	FDT_INIT();
