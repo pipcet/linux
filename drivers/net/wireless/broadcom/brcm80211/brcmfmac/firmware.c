@@ -207,8 +207,8 @@ static int brcmf_init_nvram_parser(struct nvram_parser *nvp,
 		size = BRCMF_FW_MAX_NVRAM_SIZE;
 	else
 		size = data_len;
-	/* Alloc for extra 0 byte + roundup by 4 + length field */
-	size += 1 + 3 + sizeof(u32);
+	/* Alloc for extra 0 byte + roundup by 4 + length field + room for the mac address */
+	size += 1 + 3 + sizeof(u32) + 128;
 	nvp->nvram = kzalloc(size, GFP_KERNEL);
 	if (!nvp->nvram)
 		return -ENOMEM;
@@ -237,7 +237,7 @@ static void brcmf_fw_strip_multi_v1(struct nvram_parser *nvp, u16 domain_nr,
 	u8 *nvram;
 	u8 id;
 
-	nvram = kzalloc(nvp->nvram_len + 1 + 3 + sizeof(u32), GFP_KERNEL);
+	nvram = kzalloc(nvp->nvram_len + 1 + 3 + sizeof(u32) + 128, GFP_KERNEL);
 	if (!nvram)
 		goto fail;
 
@@ -318,7 +318,7 @@ static void brcmf_fw_strip_multi_v2(struct nvram_parser *nvp, u16 domain_nr,
 	u32 i, j;
 	u8 *nvram;
 
-	nvram = kzalloc(nvp->nvram_len + 1 + 3 + sizeof(u32), GFP_KERNEL);
+	nvram = kzalloc(nvp->nvram_len + 1 + 3 + sizeof(u32) + 128, GFP_KERNEL);
 	if (!nvram) {
 		nvp->nvram_len = 0;
 		return;
@@ -395,7 +395,7 @@ static void brcmf_fw_set_macaddr(struct nvram_parser *nvp, const char *mac_addr)
 		mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-/* brcmf_nvram_strip :Takes a buffer of "<var>=<value>\n" lines read from a fil
+/* brcmf_nvram_strip :Takes a buffer of "<var>=<value>\n" lines read from a file
  * and ending in a NUL. Removes carriage returns, empty lines, comment lines,
  * and converts newlines to NULs. Shortens buffer as needed and pads with NULs.
  * End of buffer is completed with token identifying length of buffer.
