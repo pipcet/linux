@@ -1791,6 +1791,7 @@ static int brcmf_pcie_download_fw_nvram(struct brcmf_pciedev_info *devinfo,
 	if (nvram) {
 		address = devinfo->ci->rambase + devinfo->ci->ramsize -
 			  nvram_len;
+		print_hex_dump(KERN_EMERG, "NVRAM:", DUMP_PREFIX_OFFSET, 16, 4, nvram, nvram_len, true);
 		brcmf_dbg(PCIE, "Download NVRAM %s 0x%x 0x%x\n", devinfo->nvram_name, address, nvram_len);
 		brcmf_pcie_copy_mem_todev(devinfo, address, nvram, nvram_len);
 		brcmf_fw_nvram_free(nvram);
@@ -2014,7 +2015,7 @@ static void brcmf_pcie_setup(struct device *dev, int ret,
 
 	/* Some of the firmwares have the size of the memory of the device
 	 * defined inside the firmware. This is because part of the memory in
-	 * the device is shared and the devision is determined by FW. Parse
+	 * the device is shared and the division is determined by FW. Parse
 	 * the firmware and adjust the chip memory size now.
 	 */
 	brcmf_pcie_adjust_ramsize(devinfo, (u8 *)fw->data, fw->size);
