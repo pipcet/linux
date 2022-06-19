@@ -64,7 +64,6 @@ void __brcmf_err(struct brcmf_bus *bus, const char *func, const char *fmt, ...);
 	wiphy_info_once((drvr)->wiphy, "%s: " fmt, __func__,		\
 			##__VA_ARGS__)
 
-#define DEBUG 1
 #if defined(DEBUG) || defined(CONFIG_BRCM_TRACING)
 
 /* For debug/tracing purposes treat info messages as errors */
