@@ -50,7 +50,6 @@
 #define PHY_RETRIES	        1000
 #define ETH_JUMBO_MTU		9000
 #define TX_WATCHDOG		(5 * HZ)
-#define NAPI_WEIGHT		64
 #define BLINK_MS		250
 #define LINK_HZ			HZ
 
@@ -492,7 +491,9 @@ static void skge_get_strings(struct net_device *dev, u32 stringset, u8 *data)
 }
 
 static void skge_get_ring_param(struct net_device *dev,
-				struct ethtool_ringparam *p)
+				struct ethtool_ringparam *p,
+				struct kernel_ethtool_ringparam *kernel_p,
+				struct netlink_ext_ack *extack)
 {
 	struct skge_port *skge = netdev_priv(dev);
 
@@ -504,7 +505,9 @@ static void skge_get_ring_param(struct net_device *dev,
 }
 
 static int skge_set_ring_param(struct net_device *dev,
-			       struct ethtool_ringparam *p)
+			       struct ethtool_ringparam *p,
+			       struct kernel_ethtool_ringparam *kernel_p,
+			       struct netlink_ext_ack *extack)
 {
 	struct skge_port *skge = netdev_priv(dev);
 	int err = 0;
@@ -3829,7 +3832,7 @@ static struct net_device *skge_devinit(struct skge_hw *hw, int port,
 		dev->features |= NETIF_F_HIGHDMA;
 
 	skge = netdev_priv(dev);
-	netif_napi_add(dev, &skge->napi, skge_poll, NAPI_WEIGHT);
+	netif_napi_add(dev, &skge->napi, skge_poll, NAPI_POLL_WEIGHT);
 	skge->netdev = dev;
 	skge->hw = hw;
 	skge->msg_enable = netif_msg_init(debug, default_msg);

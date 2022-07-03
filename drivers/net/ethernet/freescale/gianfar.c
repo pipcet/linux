@@ -2076,10 +2076,6 @@ static int gfar_hwtstamp_set(struct net_device *netdev, struct ifreq *ifr)
 	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
 		return -EFAULT;
 
-	/* reserved for future extensions */
-	if (config.flags)
-		return -EINVAL;
-
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_OFF:
 		priv->hwts_tx_en = 0;
@@ -3236,9 +3232,9 @@ static int gfar_probe(struct platform_device *ofdev)
 	/* Register for napi ...We are registering NAPI for each grp */
 	for (i = 0; i < priv->num_grps; i++) {
 		netif_napi_add(dev, &priv->gfargrp[i].napi_rx,
-			       gfar_poll_rx_sq, GFAR_DEV_WEIGHT);
-		netif_tx_napi_add(dev, &priv->gfargrp[i].napi_tx,
-				  gfar_poll_tx_sq, 2);
+			       gfar_poll_rx_sq, NAPI_POLL_WEIGHT);
+		netif_napi_add_tx_weight(dev, &priv->gfargrp[i].napi_tx,
+					 gfar_poll_tx_sq, 2);
 	}
 
 	if (priv->device_flags & FSL_GIANFAR_DEV_HAS_CSUM) {

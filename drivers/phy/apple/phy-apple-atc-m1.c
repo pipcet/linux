@@ -37,8 +37,8 @@ struct apple_atcphy_m1 {
 
 	struct clk_hw clkhw;
 
-	struct typec_mux *typec_mux;
-	struct typec_switch *typec_sw;
+	struct typec_mux_dev *typec_mux;
+	struct typec_switch_dev *typec_sw;
 	struct usb_role_switch *role_sw;
 
 	enum typec_orientation orientation;
@@ -761,7 +761,7 @@ static int apple_atcphy_m1_set_role(struct usb_role_switch *sw, enum usb_role ro
 	return 0;
 }
 
-static int apple_atcphy_m1_set_orientation(struct typec_switch *sw,
+static int apple_atcphy_m1_set_orientation(struct typec_switch_dev *sw,
 					   enum typec_orientation orientation)
 {
 	struct apple_atcphy_m1 *atc = typec_switch_get_drvdata(sw);
@@ -770,7 +770,7 @@ static int apple_atcphy_m1_set_orientation(struct typec_switch *sw,
 	return 0;
 }
 
-static int apple_atcphy_m1_set_mux(struct typec_mux *mux, struct typec_mux_state *state)
+static int apple_atcphy_m1_set_mux(struct typec_mux_dev *mux, struct typec_mux_state *state)
 {
 	struct apple_atcphy_m1 *atc = typec_mux_get_drvdata(mux);
 	unsigned long mode = state->mode;

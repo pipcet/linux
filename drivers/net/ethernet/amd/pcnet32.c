@@ -860,7 +860,9 @@ static int pcnet32_nway_reset(struct net_device *dev)
 }
 
 static void pcnet32_get_ringparam(struct net_device *dev,
-				  struct ethtool_ringparam *ering)
+				  struct ethtool_ringparam *ering,
+				  struct kernel_ethtool_ringparam *kernel_ering,
+				  struct netlink_ext_ack *extack)
 {
 	struct pcnet32_private *lp = netdev_priv(dev);
 
@@ -871,7 +873,9 @@ static void pcnet32_get_ringparam(struct net_device *dev,
 }
 
 static int pcnet32_set_ringparam(struct net_device *dev,
-				 struct ethtool_ringparam *ering)
+				 struct ethtool_ringparam *ering,
+				 struct kernel_ethtool_ringparam *kernel_ering,
+				 struct netlink_ext_ack *extack)
 {
 	struct pcnet32_private *lp = netdev_priv(dev);
 	unsigned long flags;
@@ -1877,7 +1881,8 @@ pcnet32_probe1(unsigned long ioaddr, int shared, struct pci_dev *pdev)
 	/* napi.weight is used in both the napi and non-napi cases */
 	lp->napi.weight = lp->rx_ring_size / 2;
 
-	netif_napi_add(dev, &lp->napi, pcnet32_poll, lp->rx_ring_size / 2);
+	netif_napi_add_weight(dev, &lp->napi, pcnet32_poll,
+			      lp->rx_ring_size / 2);
 
 	if (fdx && !(lp->options & PCNET32_PORT_ASEL) &&
 	    ((cards_found >= MAX_UNITS) || full_duplex[cards_found]))

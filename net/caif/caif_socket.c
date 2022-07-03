@@ -6,6 +6,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ":%s(): " fmt, __func__
 
+#include <linux/filter.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -281,7 +282,7 @@ static int caif_seqpkt_recvmsg(struct socket *sock, struct msghdr *m,
 	if (flags & MSG_OOB)
 		goto read_error;
 
-	skb = skb_recv_datagram(sk, flags, 0 , &ret);
+	skb = skb_recv_datagram(sk, flags, &ret);
 	if (!skb)
 		goto read_error;
 	copylen = skb->len;

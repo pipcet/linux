@@ -860,8 +860,8 @@ TRACE_EVENT(drv_sta_set_txpwr,
 		LOCAL_ASSIGN;
 		VIF_ASSIGN;
 		STA_ASSIGN;
-		__entry->txpwr = sta->txpwr.power;
-		__entry->type = sta->txpwr.type;
+		__entry->txpwr = sta->deflink.txpwr.power;
+		__entry->type = sta->deflink.txpwr.type;
 	),
 
 	TP_printk(
@@ -2890,6 +2890,13 @@ TRACE_EVENT(drv_twt_teardown_request,
 		LOCAL_PR_FMT STA_PR_FMT " flowid:%d",
 		LOCAL_PR_ARG, STA_PR_ARG, __entry->flowid
 	)
+);
+
+DEFINE_EVENT(sta_event, drv_net_fill_forward_path,
+	TP_PROTO(struct ieee80211_local *local,
+		 struct ieee80211_sub_if_data *sdata,
+		 struct ieee80211_sta *sta),
+	TP_ARGS(local, sdata, sta)
 );
 
 #endif /* !__MAC80211_DRIVER_TRACE || TRACE_HEADER_MULTI_READ */

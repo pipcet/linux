@@ -56,8 +56,8 @@
 
 #include <asm/irq.h>
 
-#define TX_WORK_PER_LOOP  64
-#define RX_WORK_PER_LOOP  64
+#define TX_WORK_PER_LOOP  NAPI_POLL_WEIGHT
+#define RX_WORK_PER_LOOP  NAPI_POLL_WEIGHT
 
 /*
  * Hardware access:
@@ -4651,7 +4651,10 @@ static int nv_nway_reset(struct net_device *dev)
 	return ret;
 }
 
-static void nv_get_ringparam(struct net_device *dev, struct ethtool_ringparam* ring)
+static void nv_get_ringparam(struct net_device *dev,
+			     struct ethtool_ringparam *ring,
+			     struct kernel_ethtool_ringparam *kernel_ring,
+			     struct netlink_ext_ack *extack)
 {
 	struct fe_priv *np = netdev_priv(dev);
 
@@ -4662,7 +4665,10 @@ static void nv_get_ringparam(struct net_device *dev, struct ethtool_ringparam* r
 	ring->tx_pending = np->tx_ring_size;
 }
 
-static int nv_set_ringparam(struct net_device *dev, struct ethtool_ringparam* ring)
+static int nv_set_ringparam(struct net_device *dev,
+			    struct ethtool_ringparam *ring,
+			    struct kernel_ethtool_ringparam *kernel_ring,
+			    struct netlink_ext_ack *extack)
 {
 	struct fe_priv *np = netdev_priv(dev);
 	u8 __iomem *base = get_hwbase(dev);
@@ -5870,7 +5876,7 @@ static int nv_probe(struct pci_dev *pci_dev, const struct pci_device_id *id)
 	else
 		dev->netdev_ops = &nv_netdev_ops_optimized;
 
-	netif_napi_add(dev, &np->napi, nv_napi_poll, RX_WORK_PER_LOOP);
+	netif_napi_add(dev, &np->napi, nv_napi_poll, NAPI_POLL_WEIGHT);
 	dev->ethtool_ops = &ops;
 	dev->watchdog_timeo = NV_WATCHDOG_TIMEO;
 

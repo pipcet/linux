@@ -97,6 +97,15 @@ static const char * const aq_ethtool_queue_rx_stat_names[] = {
 	"%sQueue[%d] AllocFails",
 	"%sQueue[%d] SkbAllocFails",
 	"%sQueue[%d] Polls",
+	"%sQueue[%d] PageFlips",
+	"%sQueue[%d] PageReuses",
+	"%sQueue[%d] PageFrees",
+	"%sQueue[%d] XdpAbort",
+	"%sQueue[%d] XdpDrop",
+	"%sQueue[%d] XdpPass",
+	"%sQueue[%d] XdpTx",
+	"%sQueue[%d] XdpInvalid",
+	"%sQueue[%d] XdpRedirect",
 };
 
 static const char * const aq_ethtool_queue_tx_stat_names[] = {
@@ -812,7 +821,9 @@ static int aq_ethtool_set_pauseparam(struct net_device *ndev,
 }
 
 static void aq_get_ringparam(struct net_device *ndev,
-			     struct ethtool_ringparam *ring)
+			     struct ethtool_ringparam *ring,
+			     struct kernel_ethtool_ringparam *kernel_ring,
+			     struct netlink_ext_ack *extack)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 	struct aq_nic_cfg_s *cfg;
@@ -827,7 +838,9 @@ static void aq_get_ringparam(struct net_device *ndev,
 }
 
 static int aq_set_ringparam(struct net_device *ndev,
-			    struct ethtool_ringparam *ring)
+			    struct ethtool_ringparam *ring,
+			    struct kernel_ethtool_ringparam *kernel_ring,
+			    struct netlink_ext_ack *extack)
 {
 	struct aq_nic_s *aq_nic = netdev_priv(ndev);
 	const struct aq_hw_caps_s *hw_caps;

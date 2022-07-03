@@ -96,7 +96,7 @@ static const struct fb_fix_screeninfo xxxfb_fix = {
 
     /*
      * 	Modern graphical hardware not only supports pipelines but some 
-     *  also support multiple monitors where each display can have its  
+     *  also support multiple monitors where each display can have
      *  its own unique data. In this case each display could be  
      *  represented by a separate framebuffer device thus a separate 
      *  struct fb_info. Now the struct xxx_par represents the graphics
@@ -505,15 +505,15 @@ void xxxfb_fillrect(struct fb_info *p, const struct fb_fillrect *region)
 }
 
 /**
- *      xxxfb_copyarea - OBSOLETE function.
+ *      xxxfb_copyarea - REQUIRED function. Can use generic routines if
+ *                       non acclerated hardware and packed pixel based.
  *                       Copies one area of the screen to another area.
- *                       Will be deleted in a future version
  *
  *      @info: frame buffer structure that represents a single frame buffer
  *      @area: Structure providing the data to copy the framebuffer contents
  *	       from one region to another.
  *
- *      This drawing operation copied a rectangular area from one area of the
+ *      This drawing operation copies a rectangular area from one area of the
  *	screen to another area.
  */
 void xxxfb_copyarea(struct fb_info *p, const struct fb_copyarea *area) 
@@ -645,9 +645,9 @@ static const struct fb_ops xxxfb_ops = {
 	.fb_setcolreg	= xxxfb_setcolreg,
 	.fb_blank	= xxxfb_blank,
 	.fb_pan_display	= xxxfb_pan_display,
-	.fb_fillrect	= xxxfb_fillrect,	/* Needed !!!   */
-	.fb_copyarea	= xxxfb_copyarea,	/* Obsolete     */
-	.fb_imageblit	= xxxfb_imageblit,	/* Needed !!!   */
+	.fb_fillrect	= xxxfb_fillrect, 	/* Needed !!! */
+	.fb_copyarea	= xxxfb_copyarea,	/* Needed !!! */
+	.fb_imageblit	= xxxfb_imageblit,	/* Needed !!! */
 	.fb_cursor	= xxxfb_cursor,		/* Optional !!! */
 	.fb_sync	= xxxfb_sync,
 	.fb_ioctl	= xxxfb_ioctl,
@@ -838,9 +838,9 @@ static void xxxfb_remove(struct pci_dev *dev)
  *
  *      See Documentation/driver-api/pm/devices.rst for more information
  */
-static int xxxfb_suspend(struct pci_dev *dev, pm_message_t msg)
+static int xxxfb_suspend(struct device *dev)
 {
-	struct fb_info *info = pci_get_drvdata(dev);
+	struct fb_info *info = dev_get_drvdata(dev);
 	struct xxxfb_par *par = info->par;
 
 	/* suspend here */
@@ -853,9 +853,9 @@ static int xxxfb_suspend(struct pci_dev *dev, pm_message_t msg)
  *
  *      See Documentation/driver-api/pm/devices.rst for more information
  */
-static int xxxfb_resume(struct pci_dev *dev)
+static int xxxfb_resume(struct device *dev)
 {
-	struct fb_info *info = pci_get_drvdata(dev);
+	struct fb_info *info = dev_get_drvdata(dev);
 	struct xxxfb_par *par = info->par;
 
 	/* resume here */
@@ -873,14 +873,15 @@ static const struct pci_device_id xxxfb_id_table[] = {
 	{ 0, }
 };
 
+static SIMPLE_DEV_PM_OPS(xxxfb_pm_ops, xxxfb_suspend, xxxfb_resume);
+
 /* For PCI drivers */
 static struct pci_driver xxxfb_driver = {
 	.name =		"xxxfb",
 	.id_table =	xxxfb_id_table,
 	.probe =	xxxfb_probe,
 	.remove =	xxxfb_remove,
-	.suspend =      xxxfb_suspend, /* optional but recommended */
-	.resume =       xxxfb_resume,  /* optional but recommended */
+	.driver.pm =	xxxfb_pm_ops, /* optional but recommended */
 };
 
 MODULE_DEVICE_TABLE(pci, xxxfb_id_table);

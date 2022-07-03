@@ -1141,7 +1141,9 @@ static void mlx4_en_get_pauseparam(struct net_device *dev,
 }
 
 static int mlx4_en_set_ringparam(struct net_device *dev,
-				 struct ethtool_ringparam *param)
+				 struct ethtool_ringparam *param,
+				 struct kernel_ethtool_ringparam *kernel_param,
+				 struct netlink_ext_ack *extack)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	struct mlx4_en_dev *mdev = priv->mdev;
@@ -1208,7 +1210,9 @@ out:
 }
 
 static void mlx4_en_get_ringparam(struct net_device *dev,
-				  struct ethtool_ringparam *param)
+				  struct ethtool_ringparam *param,
+				  struct kernel_ethtool_ringparam *kernel_param,
+				  struct netlink_ext_ack *extack)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 
@@ -2106,7 +2110,7 @@ static int mlx4_en_get_module_eeprom(struct net_device *dev,
 			en_err(priv,
 			       "mlx4_get_module_info i(%d) offset(%d) bytes_to_read(%d) - FAILED (0x%x)\n",
 			       i, offset, ee->len - i, ret);
-			return 0;
+			return ret;
 		}
 
 		i += ret;

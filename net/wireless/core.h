@@ -3,7 +3,7 @@
  * Wireless configuration interface internals.
  *
  * Copyright 2006-2010	Johannes Berg <johannes@sipsolutions.net>
- * Copyright (C) 2018-2021 Intel Corporation
+ * Copyright (C) 2018-2022 Intel Corporation
  */
 #ifndef __NET_WIRELESS_CORE_H
 #define __NET_WIRELESS_CORE_H
@@ -83,6 +83,11 @@ struct cfg80211_registered_device {
 	struct work_struct event_work;
 
 	struct delayed_work dfs_update_channels_wk;
+
+	struct wireless_dev *background_radar_wdev;
+	struct cfg80211_chan_def background_radar_chandef;
+	struct delayed_work background_cac_done_wk;
+	struct work_struct background_cac_abort_wk;
 
 	/* netlink port which started critical protocol (0 means not started) */
 	u32 crit_proto_nlportid;
@@ -274,12 +279,6 @@ struct cfg80211_cached_keys {
 	struct key_params params[CFG80211_MAX_WEP_KEYS];
 	u8 data[CFG80211_MAX_WEP_KEYS][WLAN_KEY_LEN_WEP104];
 	int def;
-};
-
-enum cfg80211_chan_mode {
-	CHAN_MODE_UNDEFINED,
-	CHAN_MODE_SHARED,
-	CHAN_MODE_EXCLUSIVE,
 };
 
 struct cfg80211_beacon_registration {
@@ -491,6 +490,17 @@ cfg80211_chandef_dfs_cac_time(struct wiphy *wiphy,
 
 void cfg80211_sched_dfs_chan_update(struct cfg80211_registered_device *rdev);
 
+int
+cfg80211_start_background_radar_detection(struct cfg80211_registered_device *rdev,
+					  struct wireless_dev *wdev,
+					  struct cfg80211_chan_def *chandef);
+
+void cfg80211_stop_background_radar_detection(struct wireless_dev *wdev);
+
+void cfg80211_background_cac_done_wk(struct work_struct *work);
+
+void cfg80211_background_cac_abort_wk(struct work_struct *work);
+
 bool cfg80211_any_wiphy_oper_chan(struct wiphy *wiphy,
 				  struct ieee80211_channel *chan);
 
@@ -508,12 +518,6 @@ static inline unsigned int elapsed_jiffies_msecs(unsigned long start)
 
 	return jiffies_to_msecs(end + (ULONG_MAX - start) + 1);
 }
-
-void
-cfg80211_get_chan_state(struct wireless_dev *wdev,
-		        struct ieee80211_channel **chan,
-		        enum cfg80211_chan_mode *chanmode,
-		        u8 *radar_detect);
 
 int cfg80211_set_monitor_channel(struct cfg80211_registered_device *rdev,
 				 struct cfg80211_chan_def *chandef);

@@ -40,7 +40,6 @@
 #include <linux/can.h>
 #include <linux/can/dev.h>
 #include <linux/can/error.h>
-#include <linux/can/led.h>
 
 #include "c_can.h"
 
@@ -403,10 +402,10 @@ static int c_can_read_msg_object(struct net_device *dev, int iface, u32 ctrl)
 				frame->data[i + 1] = data >> 8;
 			}
 		}
-	}
 
+		stats->rx_bytes += frame->len;
+	}
 	stats->rx_packets++;
-	stats->rx_bytes += frame->len;
 
 	netif_receive_skb(skb);
 	return 0;
@@ -477,7 +476,6 @@ static netdev_tx_t c_can_start_xmit(struct sk_buff *skb,
 	 * transmit as we might race against do_tx().
 	 */
 	c_can_setup_tx_object(dev, IF_TX, frame, idx);
-	priv->dlc[idx] = frame->len;
 	can_put_echo_skb(skb, dev, idx, 0);
 	obj = idx + priv->msg_obj_tx_first;
 	c_can_object_put(dev, IF_TX, obj, cmd);
@@ -742,8 +740,7 @@ static void c_can_do_tx(struct net_device *dev)
 		 * NAPI. We are not transmitting.
 		 */
 		c_can_inval_tx_object(dev, IF_NAPI, obj);
-		can_get_echo_skb(dev, idx, NULL);
-		bytes += priv->dlc[idx];
+		bytes += can_get_echo_skb(dev, idx, NULL);
 		pkts++;
 	}
 
@@ -761,7 +758,6 @@ static void c_can_do_tx(struct net_device *dev)
 
 	stats->tx_bytes += bytes;
 	stats->tx_packets += pkts;
-	can_led_event(dev, CAN_LED_EVENT_TX);
 
 	tail = c_can_get_tx_tail(tx_ring);
 
@@ -908,9 +904,6 @@ static int c_can_do_rx_poll(struct net_device *dev, int quota)
 		quota -= n;
 	}
 
-	if (pkts)
-		can_led_event(dev, CAN_LED_EVENT_RX);
-
 	return pkts;
 }
 
@@ -920,7 +913,6 @@ static int c_can_handle_state_change(struct net_device *dev,
 	unsigned int reg_err_counter;
 	unsigned int rx_err_passive;
 	struct c_can_priv *priv = netdev_priv(dev);
-	struct net_device_stats *stats = &dev->stats;
 	struct can_frame *cf;
 	struct sk_buff *skb;
 	struct can_berr_counter bec;
@@ -996,8 +988,6 @@ static int c_can_handle_state_change(struct net_device *dev,
 		break;
 	}
 
-	stats->rx_packets++;
-	stats->rx_bytes += cf->len;
 	netif_receive_skb(skb);
 
 	return 1;
@@ -1064,8 +1054,6 @@ static int c_can_handle_bus_err(struct net_device *dev,
 		break;
 	}
 
-	stats->rx_packets++;
-	stats->rx_bytes += cf->len;
 	netif_receive_skb(skb);
 	return 1;
 }
@@ -1189,8 +1177,6 @@ static int c_can_open(struct net_device *dev)
 	if (err)
 		goto exit_start_fail;
 
-	can_led_event(dev, CAN_LED_EVENT_OPEN);
-
 	napi_enable(&priv->napi);
 	/* enable status change, error and module interrupts */
 	c_can_irq_control(priv, true);
@@ -1221,8 +1207,6 @@ static int c_can_close(struct net_device *dev)
 	c_can_reset_ram(priv, false);
 	c_can_pm_runtime_put_sync(priv);
 
-	can_led_event(dev, CAN_LED_EVENT_STOP);
-
 	return 0;
 }
 
@@ -1232,8 +1216,7 @@ struct net_device *alloc_c_can_dev(int msg_obj_num)
 	struct c_can_priv *priv;
 	int msg_obj_tx_num = msg_obj_num / 2;
 
-	dev = alloc_candev(struct_size(priv, dlc, msg_obj_tx_num),
-			   msg_obj_tx_num);
+	dev = alloc_candev(sizeof(*priv), msg_obj_tx_num);
 	if (!dev)
 		return NULL;
 
@@ -1254,7 +1237,8 @@ struct net_device *alloc_c_can_dev(int msg_obj_num)
 	priv->tx.tail = 0;
 	priv->tx.obj_num = msg_obj_tx_num;
 
-	netif_napi_add(dev, &priv->napi, c_can_poll, priv->msg_obj_rx_num);
+	netif_napi_add_weight(dev, &priv->napi, c_can_poll,
+			      priv->msg_obj_rx_num);
 
 	priv->dev = dev;
 	priv->can.bittiming_const = &c_can_bittiming_const;
@@ -1372,8 +1356,6 @@ static const struct net_device_ops c_can_netdev_ops = {
 
 int register_c_can_dev(struct net_device *dev)
 {
-	int err;
-
 	/* Deactivate pins to prevent DRA7 DCAN IP from being
 	 * stuck in transition when module is disabled.
 	 * Pins are activated in c_can_start() and deactivated
@@ -1385,10 +1367,7 @@ int register_c_can_dev(struct net_device *dev)
 	dev->netdev_ops = &c_can_netdev_ops;
 	c_can_set_ethtool_ops(dev);
 
-	err = register_candev(dev);
-	if (!err)
-		devm_can_led_init(dev);
-	return err;
+	return register_candev(dev);
 }
 EXPORT_SYMBOL_GPL(register_c_can_dev);
 

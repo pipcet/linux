@@ -104,7 +104,7 @@ Whenever possible, use the PHY side RGMII delay for these reasons:
 
 * PHY device drivers in PHYLIB being reusable by nature, being able to
   configure correctly a specified delay enables more designs with similar delay
-  requirements to be operate correctly
+  requirements to be operated correctly
 
 For cases where the PHY is not capable of providing this delay, but the
 Ethernet MAC driver is capable of doing so, the correct phy_interface_t value
@@ -236,6 +236,11 @@ their interface mode without software interaction depending on the
 negotiation results.
 
 Some of the interface modes are described below:
+
+``PHY_INTERFACE_MODE_SMII``
+    This is serial MII, clocked at 125MHz, supporting 100M and 10M speeds.
+    Some details can be found in
+    https://opencores.org/ocsvn/smii/smii/trunk/doc/SMII.pdf
 
 ``PHY_INTERFACE_MODE_1000BASEX``
     This defines the 1000BASE-X single-lane serdes link as defined by the

@@ -22,6 +22,7 @@
 #include <linux/firmware.h>
 
 struct devlink;
+struct devlink_linecard;
 
 struct devlink_port_phys_attrs {
 	u32 port_number; /* Same value as "split group".
@@ -135,6 +136,7 @@ struct devlink_port {
 	struct mutex reporters_lock; /* Protects reporter_list */
 
 	struct devlink_rate *devlink_rate;
+	struct devlink_linecard *linecard;
 };
 
 struct devlink_port_new_attrs {
@@ -146,6 +148,40 @@ struct devlink_port_new_attrs {
 	u8 port_index_valid:1,
 	   controller_valid:1,
 	   sfnum_valid:1;
+};
+
+/**
+ * struct devlink_linecard_ops - Linecard operations
+ * @provision: callback to provision the linecard slot with certain
+ *	       type of linecard. As a result of this operation,
+ *	       driver is expected to eventually (could be after
+ *	       the function call returns) call one of:
+ *	       devlink_linecard_provision_set()
+ *	       devlink_linecard_provision_fail()
+ * @unprovision: callback to unprovision the linecard slot. As a result
+ *		 of this operation, driver is expected to eventually
+ *		 (could be after the function call returns) call
+ *	         devlink_linecard_provision_clear()
+ *	         devlink_linecard_provision_fail()
+ * @same_provision: callback to ask the driver if linecard is already
+ *                  provisioned in the same way user asks this linecard to be
+ *                  provisioned.
+ * @types_count: callback to get number of supported types
+ * @types_get: callback to get next type in list
+ */
+struct devlink_linecard_ops {
+	int (*provision)(struct devlink_linecard *linecard, void *priv,
+			 const char *type, const void *type_priv,
+			 struct netlink_ext_ack *extack);
+	int (*unprovision)(struct devlink_linecard *linecard, void *priv,
+			   struct netlink_ext_ack *extack);
+	bool (*same_provision)(struct devlink_linecard *linecard, void *priv,
+			       const char *type, const void *type_priv);
+	unsigned int (*types_count)(struct devlink_linecard *linecard,
+				    void *priv);
+	void (*types_get)(struct devlink_linecard *linecard,
+			  void *priv, unsigned int index, const char **type,
+			  const void **type_priv);
 };
 
 struct devlink_sb_pool_info {
@@ -361,33 +397,6 @@ devlink_resource_size_params_init(struct devlink_resource_size_params *size_para
 
 typedef u64 devlink_resource_occ_get_t(void *priv);
 
-/**
- * struct devlink_resource - devlink resource
- * @name: name of the resource
- * @id: id, per devlink instance
- * @size: size of the resource
- * @size_new: updated size of the resource, reload is needed
- * @size_valid: valid in case the total size of the resource is valid
- *              including its children
- * @parent: parent resource
- * @size_params: size parameters
- * @list: parent list
- * @resource_list: list of child resources
- */
-struct devlink_resource {
-	const char *name;
-	u64 id;
-	u64 size;
-	u64 size_new;
-	bool size_valid;
-	struct devlink_resource *parent;
-	struct devlink_resource_size_params size_params;
-	struct list_head list;
-	struct list_head resource_list;
-	devlink_resource_occ_get_t *occ_get;
-	void *occ_get_priv;
-};
-
 #define DEVLINK_RESOURCE_ID_PARENT_TOP 0
 
 #define DEVLINK_RESOURCE_GENERIC_NAME_PORTS "physical_ports"
@@ -485,6 +494,9 @@ enum devlink_param_generic_id {
 	DEVLINK_PARAM_GENERIC_ID_ENABLE_ETH,
 	DEVLINK_PARAM_GENERIC_ID_ENABLE_RDMA,
 	DEVLINK_PARAM_GENERIC_ID_ENABLE_VNET,
+	DEVLINK_PARAM_GENERIC_ID_ENABLE_IWARP,
+	DEVLINK_PARAM_GENERIC_ID_IO_EQ_SIZE,
+	DEVLINK_PARAM_GENERIC_ID_EVENT_EQ_SIZE,
 
 	/* add new param generic ids above here*/
 	__DEVLINK_PARAM_GENERIC_ID_MAX,
@@ -533,6 +545,15 @@ enum devlink_param_generic_id {
 
 #define DEVLINK_PARAM_GENERIC_ENABLE_VNET_NAME "enable_vnet"
 #define DEVLINK_PARAM_GENERIC_ENABLE_VNET_TYPE DEVLINK_PARAM_TYPE_BOOL
+
+#define DEVLINK_PARAM_GENERIC_ENABLE_IWARP_NAME "enable_iwarp"
+#define DEVLINK_PARAM_GENERIC_ENABLE_IWARP_TYPE DEVLINK_PARAM_TYPE_BOOL
+
+#define DEVLINK_PARAM_GENERIC_IO_EQ_SIZE_NAME "io_eq_size"
+#define DEVLINK_PARAM_GENERIC_IO_EQ_SIZE_TYPE DEVLINK_PARAM_TYPE_U32
+
+#define DEVLINK_PARAM_GENERIC_EVENT_EQ_SIZE_NAME "event_eq_size"
+#define DEVLINK_PARAM_GENERIC_EVENT_EQ_SIZE_TYPE DEVLINK_PARAM_TYPE_U32
 
 #define DEVLINK_PARAM_GENERIC(_id, _cmodes, _get, _set, _validate)	\
 {									\
@@ -687,13 +708,17 @@ struct devlink_health_reporter_ops {
  * @trap_name: Trap name.
  * @trap_group_name: Trap group name.
  * @input_dev: Input netdevice.
+ * @dev_tracker: refcount tracker for @input_dev.
  * @fa_cookie: Flow action user cookie.
  * @trap_type: Trap type.
  */
 struct devlink_trap_metadata {
 	const char *trap_name;
 	const char *trap_group_name;
+
 	struct net_device *input_dev;
+	netdevice_tracker dev_tracker;
+
 	const struct flow_action_cookie *fa_cookie;
 	enum devlink_trap_type trap_type;
 };
@@ -1208,9 +1233,9 @@ struct devlink_ops {
 			 struct netlink_ext_ack *extack);
 	int (*port_type_set)(struct devlink_port *devlink_port,
 			     enum devlink_port_type port_type);
-	int (*port_split)(struct devlink *devlink, unsigned int port_index,
+	int (*port_split)(struct devlink *devlink, struct devlink_port *port,
 			  unsigned int count, struct netlink_ext_ack *extack);
-	int (*port_unsplit)(struct devlink *devlink, unsigned int port_index,
+	int (*port_unsplit)(struct devlink *devlink, struct devlink_port *port,
 			    struct netlink_ext_ack *extack);
 	int (*sb_pool_get)(struct devlink *devlink, unsigned int sb_index,
 			   u16 pool_index,
@@ -1490,6 +1515,21 @@ void *devlink_priv(struct devlink *devlink);
 struct devlink *priv_to_devlink(void *priv);
 struct device *devlink_to_dev(const struct devlink *devlink);
 
+/* Devlink instance explicit locking */
+void devl_lock(struct devlink *devlink);
+void devl_unlock(struct devlink *devlink);
+void devl_assert_locked(struct devlink *devlink);
+bool devl_lock_is_held(struct devlink *devlink);
+
+int devl_port_register(struct devlink *devlink,
+		       struct devlink_port *devlink_port,
+		       unsigned int port_index);
+void devl_port_unregister(struct devlink_port *devlink_port);
+
+int devl_rate_leaf_create(struct devlink_port *port, void *priv);
+void devl_rate_leaf_destroy(struct devlink_port *devlink_port);
+void devl_rate_nodes_destroy(struct devlink *devlink);
+
 struct ib_device;
 
 struct net *devlink_net(const struct devlink *devlink);
@@ -1532,6 +1572,18 @@ void devlink_port_attrs_pci_sf_set(struct devlink_port *devlink_port,
 int devlink_rate_leaf_create(struct devlink_port *port, void *priv);
 void devlink_rate_leaf_destroy(struct devlink_port *devlink_port);
 void devlink_rate_nodes_destroy(struct devlink *devlink);
+void devlink_port_linecard_set(struct devlink_port *devlink_port,
+			       struct devlink_linecard *linecard);
+struct devlink_linecard *
+devlink_linecard_create(struct devlink *devlink, unsigned int linecard_index,
+			const struct devlink_linecard_ops *ops, void *priv);
+void devlink_linecard_destroy(struct devlink_linecard *linecard);
+void devlink_linecard_provision_set(struct devlink_linecard *linecard,
+				    const char *type);
+void devlink_linecard_provision_clear(struct devlink_linecard *linecard);
+void devlink_linecard_provision_fail(struct devlink_linecard *linecard);
+void devlink_linecard_activate(struct devlink_linecard *linecard);
+void devlink_linecard_deactivate(struct devlink_linecard *linecard);
 int devlink_sb_register(struct devlink *devlink, unsigned int sb_index,
 			u32 size, u16 ingress_pools_count,
 			u16 egress_pools_count, u16 ingress_tc_count,
@@ -1567,8 +1619,7 @@ int devlink_resource_register(struct devlink *devlink,
 			      u64 resource_id,
 			      u64 parent_resource_id,
 			      const struct devlink_resource_size_params *size_params);
-void devlink_resources_unregister(struct devlink *devlink,
-				  struct devlink_resource *resource);
+void devlink_resources_unregister(struct devlink *devlink);
 int devlink_resource_size_get(struct devlink *devlink,
 			      u64 resource_id,
 			      u64 *p_resource_size);

@@ -6,6 +6,12 @@
 
 #include <linux/types.h>
 
+#include "hnae3.h"
+
+struct hclge_dev;
+struct hclge_vport;
+enum hclge_opcode_type;
+
 /* MAC Pause */
 #define HCLGE_TX_MAC_PAUSE_EN_MSK	BIT(0)
 #define HCLGE_RX_MAC_PAUSE_EN_MSK	BIT(1)
@@ -231,6 +237,7 @@ int hclge_pause_addr_cfg(struct hclge_dev *hdev, const u8 *mac_addr);
 void hclge_pfc_rx_stats_get(struct hclge_dev *hdev, u64 *stats);
 void hclge_pfc_tx_stats_get(struct hclge_dev *hdev, u64 *stats);
 int hclge_tm_qs_shaper_cfg(struct hclge_vport *vport, int max_tx_rate);
+int hclge_tm_port_shaper_cfg(struct hclge_dev *hdev);
 int hclge_tm_get_qset_num(struct hclge_dev *hdev, u16 *qset_num);
 int hclge_tm_get_pri_num(struct hclge_dev *hdev, u8 *pri_num);
 int hclge_tm_get_qset_map_pri(struct hclge_dev *hdev, u16 qset_id, u8 *priority,

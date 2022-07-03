@@ -10,8 +10,6 @@
 #include "bpf_tcp_nogpl.skel.h"
 #include "bpf_dctcp_release.skel.h"
 
-#define min(a, b) ((a) < (b) ? (a) : (b))
-
 #ifndef ENOTSUPP
 #define ENOTSUPP 524
 #endif
@@ -53,7 +51,7 @@ static void *server(void *arg)
 
 	while (bytes < total_bytes && !READ_ONCE(stop)) {
 		nr_sent = send(fd, &batch,
-			       min(total_bytes - bytes, sizeof(batch)), 0);
+			       MIN(total_bytes - bytes, sizeof(batch)), 0);
 		if (nr_sent == -1 && errno == EINTR)
 			continue;
 		if (nr_sent == -1) {
@@ -146,7 +144,7 @@ static void do_test(const char *tcp_ca, const struct bpf_map *sk_stg_map)
 	/* recv total_bytes */
 	while (bytes < total_bytes && !READ_ONCE(stop)) {
 		nr_recv = recv(fd, &batch,
-			       min(total_bytes - bytes, sizeof(batch)), 0);
+			       MIN(total_bytes - bytes, sizeof(batch)), 0);
 		if (nr_recv == -1 && errno == EINTR)
 			continue;
 		if (nr_recv == -1)
@@ -217,21 +215,22 @@ static bool found;
 static int libbpf_debug_print(enum libbpf_print_level level,
 			      const char *format, va_list args)
 {
-	char *log_buf;
+	const char *prog_name, *log_buf;
 
 	if (level != LIBBPF_WARN ||
-	    strcmp(format, "libbpf: \n%s\n")) {
+	    !strstr(format, "-- BEGIN PROG LOAD LOG --")) {
 		vprintf(format, args);
 		return 0;
 	}
 
+	prog_name = va_arg(args, char *);
 	log_buf = va_arg(args, char *);
 	if (!log_buf)
 		goto out;
 	if (err_str && strstr(log_buf, err_str) != NULL)
 		found = true;
 out:
-	printf(format, log_buf);
+	printf(format, prog_name, log_buf);
 	return 0;
 }
 

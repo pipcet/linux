@@ -33,6 +33,7 @@
 
 #include <linux/bpf.h>
 #include <linux/etherdevice.h>
+#include <linux/filter.h>
 #include <linux/tcp.h>
 #include <linux/if_vlan.h>
 #include <linux/delay.h>
@@ -2427,10 +2428,6 @@ static int mlx4_en_hwtstamp_set(struct net_device *dev, struct ifreq *ifr)
 	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
 		return -EFAULT;
 
-	/* reserved for future extensions */
-	if (config.flags)
-		return -EINVAL;
-
 	/* device doesn't support time stamping */
 	if (!(mdev->dev->caps.flags2 & MLX4_DEV_CAP_FLAG2_TS))
 		return -EINVAL;
@@ -3419,6 +3416,9 @@ int mlx4_en_init_netdev(struct mlx4_en_dev *mdev, int port,
 	/* MTU range: 68 - hw-specific max */
 	dev->min_mtu = ETH_MIN_MTU;
 	dev->max_mtu = priv->max_mtu;
+
+	/* supports LSOv2 packets. */
+	netif_set_tso_max_size(dev, GSO_MAX_SIZE);
 
 	mdev->pndev[port] = dev;
 	mdev->upper[port] = NULL;

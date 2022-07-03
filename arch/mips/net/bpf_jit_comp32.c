@@ -722,7 +722,7 @@ static void emit_atomic_r32(struct jit_context *ctx,
 		  0, JIT_RESERVED_STACK);
 	/*
 	 * Argument 1: dst+off if xchg, otherwise src, passed in register a0
-	 * Argument 2: src if xchg, othersize dst+off, passed in register a1
+	 * Argument 2: src if xchg, otherwise dst+off, passed in register a1
 	 */
 	emit(ctx, move, MIPS_R_T9, dst);
 	if (code == BPF_XCHG) {
@@ -1381,8 +1381,7 @@ void build_prologue(struct jit_context *ctx)
 	 * 16-byte area in the parent's stack frame. On a tail call, the
 	 * calling function jumps into the prologue after these instructions.
 	 */
-	emit(ctx, ori, MIPS_R_T9, MIPS_R_ZERO,
-	     min(MAX_TAIL_CALL_CNT + 1, 0xffff));
+	emit(ctx, ori, MIPS_R_T9, MIPS_R_ZERO, min(MAX_TAIL_CALL_CNT, 0xffff));
 	emit(ctx, sw, MIPS_R_T9, 0, MIPS_R_SP);
 
 	/*

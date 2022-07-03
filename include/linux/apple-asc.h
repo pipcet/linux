@@ -54,6 +54,9 @@ struct apple_ans_mbox_msg {
 #define EP0_START	(EP0_TYPE_START | 0x0002)
 #define EP0_EHLLO	(EP0_TYPE_EHLLO | BIT(32))
 #define EP0_RESET	(EP0_TYPE_RESET | 0x0220)
+#define EP0_SLEEP      (EP0_TYPE_RESET | 0x0201)
+#define EP0_POWER_OFF  (EP0_TYPE_RESET | 0x0)
+
 
 #define EP0_EHLLO_MAGIC	0x000b000b
 

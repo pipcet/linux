@@ -591,7 +591,6 @@ static int smc_probe(struct platform_device *pdev)
 
 	mutex_unlock(&smc->mutex);
 
-	smc->irq_chip.parent_device = smc->dev;
 	smc->irq_chip.name = "smc";
 	smc->irq_chip.irq_mask = irq_mask_unmask_noop;
 	smc->irq_chip.irq_unmask = irq_mask_unmask_noop;

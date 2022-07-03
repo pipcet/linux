@@ -2034,7 +2034,7 @@ static void applespi_drain_reads(struct applespi_data *applespi)
 	spin_unlock_irqrestore(&applespi->cmd_msg_lock, flags);
 }
 
-static int applespi_remove(struct spi_device *spi)
+static void applespi_remove(struct spi_device *spi)
 {
 	struct applespi_data *applespi = spi_get_drvdata(spi);
 
@@ -2052,8 +2052,6 @@ static int applespi_remove(struct spi_device *spi)
 	applespi_drain_reads(applespi);
 
 	debugfs_remove_recursive(applespi->debugfs_root);
-
-	return 0;
 }
 
 static void applespi_shutdown(struct spi_device *spi)

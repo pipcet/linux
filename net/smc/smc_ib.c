@@ -12,6 +12,8 @@
  *  Author(s):  Ursula Braun <ubraun@linux.vnet.ibm.com>
  */
 
+#include <linux/etherdevice.h>
+#include <linux/if_vlan.h>
 #include <linux/random.h>
 #include <linux/workqueue.h>
 #include <linux/scatterlist.h>
@@ -109,12 +111,12 @@ int smc_ib_modify_qp_rts(struct smc_link *lnk)
 			    IB_QP_MAX_QP_RD_ATOMIC);
 }
 
-int smc_ib_modify_qp_reset(struct smc_link *lnk)
+int smc_ib_modify_qp_error(struct smc_link *lnk)
 {
 	struct ib_qp_attr qp_attr;
 
 	memset(&qp_attr, 0, sizeof(qp_attr));
-	qp_attr.qp_state = IB_QPS_RESET;
+	qp_attr.qp_state = IB_QPS_ERR;
 	return ib_modify_qp(lnk->roce_qp, &qp_attr, IB_QP_STATE);
 }
 
@@ -669,6 +671,7 @@ int smc_ib_create_queue_pair(struct smc_link *lnk)
 			.max_recv_wr = SMC_WR_BUF_CNT * 3,
 			.max_send_sge = SMC_IB_MAX_SEND_SGE,
 			.max_recv_sge = sges_per_buf,
+			.max_inline_data = 0,
 		},
 		.sq_sig_type = IB_SIGNAL_REQ_WR,
 		.qp_type = IB_QPT_RC,
