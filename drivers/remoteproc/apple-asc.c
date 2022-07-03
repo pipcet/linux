@@ -184,7 +184,11 @@ static int ep0_send(struct apple_asc *asc, u64 payload)
 	if (ret < 0)
 		return ret;
 
-	wait_for_completion(&asc->tx_complete);
+	ret = wait_for_completion_timeout(&asc->tx_complete, ASC_TIMEOUT_MSEC);
+
+	if (ret == 0)
+		return -ETIME;
+
 	reinit_completion(&asc->tx_complete);
 
 	return 0;
@@ -349,6 +353,7 @@ static int apple_asc_attach(struct rproc *rproc)
 	apple_asc_lock_exclusively(&asc->rproc);
 	switch (asc->state) {
 	case APPLE_ASC_OFF:
+	off:
 		cpu_control = readl(asc->reg + REG_CPU_CONTROL);
 		writel(cpu_control | CPU_CONTROL_ENABLE,
 		       asc->reg + REG_CPU_CONTROL);
@@ -364,6 +369,7 @@ static int apple_asc_attach(struct rproc *rproc)
 
 	case APPLE_ASC_HELLOABLE:
 		ret = -ETIME;
+		goto out;
 		apple_asc_pwrack(&asc->rproc);
 		break;
 	default:
@@ -373,8 +379,15 @@ static int apple_asc_attach(struct rproc *rproc)
 	asc->state = APPLE_ASC_ATTACHED;
 
 	if (ret == -ETIME) {
+	  goto out;
 		printk(KERN_WARNING "attempting EHLLO\n");
-		ret = ep0_send(asc, EP0_TYPE_EHLLO | EP0_EHLLO_MAGIC);
+		ret = ep0_send(asc, EP0_SLEEP);
+		ret = ep0_recv(asc, &payload);
+		if (trycount-- <= 0) {
+		  ret = -ETIME;
+		  goto out;
+		}
+		goto off;
 	}
 	if (ret < 0)
 		goto out;
@@ -383,7 +396,7 @@ static int apple_asc_attach(struct rproc *rproc)
 		payload = EP0_TYPE_EHLLO | (payload & U32_MAX);
 		if ((payload & 0xffffffffULL) == 0x000c000b) {
 			payload &= ~0xffffffffULL;
-			payload |= 0x000b000b;
+			payload |= 0x000c000c;
 		}
 		ret = ep0_send(asc, payload);
 		if (ret < 0)
