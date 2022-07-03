@@ -7,6 +7,7 @@
 
 #include <linux/cpufreq.h>
 #include <linux/dma-mapping.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -316,7 +317,7 @@ static void apple_m1_cpufreq_hwsetup(struct apple_m1_cpufreq_data *hc)
 	while (readl(base[1] + CLUSTER_PSTATE) & CLUSTER_PSTATE_BUSY);
 
 	apple_m1_cpufreq_hwsetup_cluster(hc, 0);
-	apple_m1_cpufreq_hwsetup_cluster(hc, 1);
+	//apple_m1_cpufreq_hwsetup_cluster(hc, 1);
 }
 
 static int apple_m1_cpufreq_probe(struct platform_device *pdev)
@@ -326,8 +327,6 @@ static int apple_m1_cpufreq_probe(struct platform_device *pdev)
 	struct resource *res;
 	unsigned int i = 0, err;
 
-	return -ENODEV;
-
 	hc = devm_kzalloc(&pdev->dev, sizeof(*hc), GFP_KERNEL);
 	if(!hc)
 		return -ENOMEM;
@@ -336,7 +335,8 @@ static int apple_m1_cpufreq_probe(struct platform_device *pdev)
 
 	for(i=0; i<NUM_BASES; i++) {
 		res = platform_get_resource(pdev, IORESOURCE_MEM, i);
-		hc->base[i] = devm_ioremap_resource(&pdev->dev, res);
+		hc->base[i] = devm_ioremap_np(&pdev->dev, res->start,
+					      resource_size(res));
 		if(IS_ERR(hc->base[i])) {
 			err = PTR_ERR(hc->base[i]);
 			return err;
