@@ -63,4 +63,9 @@
 		device_type = "memory";
 		reg = <0x8 0 0x2 0>; /* To be filled by loader */
 	};
+
+	backlight: backlight {
+		compatible = "apple,apple-dcp-hdmi";
+		max-brightness = <1>;
+	};
 };
