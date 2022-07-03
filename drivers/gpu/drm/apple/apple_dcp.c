@@ -124,11 +124,13 @@ struct apple_dcp {
 	struct device *dev;
 	struct mutex mutex;
 	bool forced_to_4k;
+	bool powered;
 	struct apple_dcp_stream stream[N_STREAMS];
 	struct kvbox kvbox;
-	struct work_struct work;
+	struct work_struct work_apply;
 	struct work_struct work_callback;
-	struct apple_dcp_mbox_msg *msg;
+	struct work_struct work_modeset;
+	struct apple_dcp_msg_header *msg;
 	spinlock_t lock;
 	bool write;
 	struct kvbox_prop *prop;
@@ -179,20 +181,25 @@ static void callback_device_memory(struct apple_dcp *dcp, struct apple_dcp_msg *
 	memcpy(msg->data, out, sizeof(out));
 }
 
+static void callback_hotplug(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
+{
+	if (dcp->powered)
+		schedule_work(&dcp->work_modeset);
+}
+
 extern u64 get_fb_physical_address(u64 *, u64 *);
 
 static u64 apple_get_fb_dva(struct apple_dcp *dcp, u64 *width, u64 *height)
 {
 	struct device *dev = dcp->fb;
 	static dma_addr_t dma_addr;
-	void *va;
+	u64 base = get_fb_physical_address(width, height);
 
 	BUG_ON(!dcp->fb);
 
 	if (!dma_addr) {
 		struct iommu_domain *domain;
 		size_t off;
-		u64 base = get_fb_physical_address(width, height);
 		struct iommu_iotlb_gather gather = {};
 		dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 		/* XXX work out why dma_alloc_coherent doesn't work here. */
@@ -354,6 +361,7 @@ static struct apple_dcp_callback apple_dcp_callbacks[] = {
 	{ FOURCC("D201"), callback_map_buffer },
 	{ FOURCC("D206"), callback_return_one },
 	{ FOURCC("D207"), callback_return_one },
+	{ FOURCC("D211"), callback_return_zero },
 	{ FOURCC("D300"), callback_nop },
 	{ FOURCC("D401"), callback_return_zero },
 	{ FOURCC("D408"), callback_clock_frequency },
@@ -369,6 +377,7 @@ static struct apple_dcp_callback apple_dcp_callbacks[] = {
 	{ FOURCC("D565"), callback_return_one },
 	{ FOURCC("D567"), callback_return_one },
 	{ FOURCC("D574"), callback_return_zero },
+	{ FOURCC("D576"), callback_hotplug },
 	{ FOURCC("D598"), callback_return_zero },
 };
 
@@ -408,6 +417,12 @@ void apple_dcp_set_fb(struct apple_dcp *dcp, struct device *fb)
 }
 EXPORT_SYMBOL(apple_dcp_set_fb);
 
+struct apple_dcp_msg_set_power_state {
+	struct apple_dcp_msg_header header;
+	u32 in[3];
+	u32 out[2];
+} __attribute__((packed));
+
 static int apple_fw_call(struct apple_dcp *dcp,
 			 struct apple_dcp_msg_header *header,
 			 int stream)
@@ -424,12 +439,41 @@ static int apple_fw_call(struct apple_dcp *dcp,
 	return ret;
 }
 
+static int apple_dcp_init_4k(struct apple_dcp *);
+
+#define INIT_APPLE_DCP_MSG(ptr, code_str)  do {			\
+		(ptr)->header.code = FOURCC(code_str);		\
+		(ptr)->header.len_input = sizeof((ptr)->in);	\
+		(ptr)->header.len_output = sizeof((ptr)->out);	\
+	} while (0)
+
+void apple_dcp_set_power(struct apple_dcp *dcp, int state)
+{
+	struct apple_dcp_msg_set_power_state a468 = {
+		.in = { },
+	};
+	if (dcp == NULL)
+		dcp = apple_dcp;
+	if (dcp == NULL)
+		return;
+	INIT_APPLE_DCP_MSG(&a468, "A468");
+	a468.in[0] = !!state;
+	dcp->powered = a468.in[0];
+	apple_fw_call(dcp, &a468.header, STREAM_COMMAND);
+	if (state != 0) {
+		schedule_work(&dcp->work_modeset);
+	}
+}
+EXPORT_SYMBOL(apple_dcp_set_power);
+
 static void apple_dcp_single_callback(struct apple_dcp *dcp, struct apple_dcp_msg *msg)
 {
 	struct apple_dcp_callback *callback = apple_dcp_callbacks;
 
 	while (callback < apple_dcp_callbacks + sizeof(apple_dcp_callbacks)/sizeof(apple_dcp_callbacks[0])) {
 		if (callback->fourcc == msg->header.code) {
+			dev_info(dcp->dev, "callback %c%c%c%c found!\n",
+				 FOURCC_CHARS(msg->header.code));
 			callback_return_zero(dcp, msg);
 			callback->callback(dcp, msg);
 			return;
@@ -439,9 +483,10 @@ static void apple_dcp_single_callback(struct apple_dcp *dcp, struct apple_dcp_ms
 
 	dev_err(dcp->dev, "callback %c%c%c%c not found!\n",
 		FOURCC_CHARS(msg->header.code));
+	callback_return_zero(dcp, msg);
 }
 
-static void apple_dcp_work_func(struct work_struct *work)
+static void apple_dcp_work_callback_func(struct work_struct *work)
 {
 	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work_callback);
 
@@ -457,6 +502,96 @@ static void apple_dcp_work_func(struct work_struct *work)
 		devm_kfree(dcp->dev, list_msg);
 	}
 }
+
+static void apple_dcp_work_apply_func(struct work_struct *work)
+{
+	struct apple_dcp *dcp = container_of(work, struct apple_dcp, work_apply);
+	unsigned long flags;
+
+	spin_lock_irqsave(&dcp->lock, flags);
+	if (dcp->write) {
+		struct apple_dcp_msg_header *msg = dcp->msg;
+		int ret;
+		spin_unlock_irqrestore(&dcp->lock, flags);
+
+		ret = apple_fw_call(dcp, msg, STREAM_COMMAND);
+
+		kfree(msg);
+		spin_lock_irqsave(&dcp->lock, flags);
+		dcp->write = false;
+		dcp->prop = NULL;
+	}
+	spin_unlock_irqrestore(&dcp->lock, flags);
+}
+
+struct apple_dcp_msg_apply_property {
+	struct apple_dcp_msg_header header;
+	struct {
+		u32 key;
+		u32 val;
+	} __attribute__((packed)) in;
+	struct {
+		u32 ret;
+	} __attribute__((packed)) out;
+};
+
+static int apple_dcp_kvbox_write(struct kvbox *kvbox, struct kvbox_prop *prop)
+{
+	struct apple_dcp *dcp = kvbox->priv;
+	size_t key_len = prop->key_len;
+	size_t val_len = prop->data_len;
+	struct apple_dcp_msg_apply_property *msg =
+		kzalloc(sizeof(*msg) + 0x100, GFP_KERNEL);
+	u32 key;
+	u32 val;
+	int ret;
+	unsigned long flags;
+
+	if (!msg)
+		return -ENOMEM;
+
+	if (key_len != 8)
+		return -EINVAL;
+
+	if (val_len != 4)
+		return -EINVAL;
+
+	ret = kstrtou32(prop->key, 16, &key);
+	if (ret < 0)
+		return ret;
+
+	memcpy(&val, prop->data, sizeof(val));
+
+	if (!spin_trylock_irqsave(&dcp->lock, flags))
+		return -EBUSY;
+
+	if (dcp->prop) {
+		spin_unlock_irqrestore(&dcp->lock, flags);
+		return -EBUSY;
+	}
+
+	dcp->prop = prop;
+	dcp->write = true;
+
+	INIT_APPLE_DCP_MSG(msg, "A352");
+	msg->in.key = key;
+	msg->in.val = val;
+
+	dcp->msg = &msg->header;
+	schedule_work(&dcp->work_apply);
+
+	spin_unlock_irqrestore(&dcp->lock, flags);
+	if (ret < 0)
+		return ret;
+
+	kvbox_done(&dcp->kvbox);
+
+	return 0;
+}
+
+static const struct kvbox_ops apple_dcp_kvbox_ops = {
+	.write = apple_dcp_kvbox_write,
+};
 
 static int apple_dcp_command_debugfs_show(struct seq_file *s, void *ptr)
 {
@@ -542,8 +677,6 @@ static int apple_dcp_trigger_debugfs_show(struct seq_file *s, void *ptr)
 	return 0;
 }
 
-static int apple_dcp_init_4k(struct apple_dcp *);
-
 static ssize_t apple_dcp_trigger_debugfs_write(struct file *file,
 					       const char __user *user_buf,
 					       size_t size, loff_t *ppos)
@@ -551,7 +684,7 @@ static ssize_t apple_dcp_trigger_debugfs_write(struct file *file,
 	struct seq_file *s = file->private_data;
 	struct apple_dcp *dcp = s->private;
 
-	apple_dcp_init_4k(dcp);
+	schedule_work(&dcp->work_modeset);
 	*ppos += size;
 
 	return size;
@@ -638,12 +771,6 @@ struct apple_dcp_msg_int_void {
 	struct apple_dcp_msg_header header;
 	u32 in;
 	struct {} __attribute__((packed)) out;
-} __attribute__((packed));
-
-struct apple_dcp_msg_set_power_state {
-	struct apple_dcp_msg_header header;
-	u32 in[3];
-	u32 out[2];
 } __attribute__((packed));
 
 struct apple_dcp_msg_color_remap_mode {
@@ -757,12 +884,6 @@ struct apple_dcp_msg_set_digital_mode {
 	u32 out[1];
 } __attribute__((packed));
 
-#define INIT_APPLE_DCP_MSG(ptr, code_str)  do {			\
-		(ptr)->header.code = FOURCC(code_str);		\
-		(ptr)->header.len_input = sizeof((ptr)->in);	\
-		(ptr)->header.len_output = sizeof((ptr)->out);	\
-	} while (0)
-
 static int apple_dcp_init_4k(struct apple_dcp *dcp)
 {
 	struct apple_dcp_msg_set_digital_mode a412 = {
@@ -771,7 +892,8 @@ static int apple_dcp_init_4k(struct apple_dcp *dcp)
 	struct apple_dcp_msg_begin_swap *a407 = kzalloc(sizeof *a407, GFP_KERNEL);
 	struct apple_dcp_msg_start_swap *a408 = kzalloc(sizeof *a408, GFP_KERNEL);
 	int delay = 2000;
-	u32 surface_id = 3; /* this works... */
+	static u32 surface_id = 3; /* this works... */
+	surface_id++;
 
 	INIT_APPLE_DCP_MSG(&a412, "A412");
 
@@ -819,10 +941,17 @@ static int apple_dcp_init_4k(struct apple_dcp *dcp)
 		apple_fw_call(dcp, &a408->header, STREAM_COMMAND);
 		delay += 250;
 	}
-	msleep(10000);
 
 	return 0;
 }
+
+static void apple_dcp_work_modeset_func(struct work_struct *work)
+{
+	struct apple_dcp *dcp = container_of(work, struct apple_dcp,
+					     work_modeset);
+	apple_dcp_init_4k(dcp);
+}
+
 
 static int apple_dcp_init(struct apple_dcp *dcp)
 {
@@ -878,6 +1007,7 @@ static int apple_dcp_init(struct apple_dcp *dcp)
 	apple_fw_call(dcp, &a469.header, STREAM_COMMAND);
 	apple_fw_call(dcp, &a411.header, STREAM_COMMAND);
 	apple_fw_call(dcp, &a468.header, STREAM_COMMAND);
+	dcp->powered = true;
 
 	get_fb_physical_address(&fb_width, &fb_height);
 
@@ -922,12 +1052,20 @@ static int apple_dcp_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&dcp->rbufs);
 	INIT_LIST_HEAD(&dcp->callback_messages);
 	INIT_LIST_HEAD(&dcp->debugfs_messages);
-	INIT_WORK(&dcp->work_callback, apple_dcp_work_func);
+	INIT_WORK(&dcp->work_callback, apple_dcp_work_callback_func);
+	INIT_WORK(&dcp->work_apply, apple_dcp_work_apply_func);
+	INIT_WORK(&dcp->work_modeset, apple_dcp_work_modeset_func);
 	mutex_init(&dcp->mutex);
 	spin_lock_init(&dcp->lock);
 
 	apple_dcp = dcp;
 	of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
+
+	dcp->kvbox.dev = dcp->dev;
+	dcp->kvbox.ops = &apple_dcp_kvbox_ops;
+	dcp->kvbox.priv = dcp;
+	INIT_LIST_HEAD(&dcp->kvbox.requests);
+	kvbox_register(&dcp->kvbox);
 
 	apple_dcp_debugfs_init(dcp);
 
