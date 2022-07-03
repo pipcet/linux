@@ -715,6 +715,7 @@
 				iommus = <&dcp_dart 0>;
 				dcp: apple_dcp {
 					compatible = "apple,t8103-dcp";
+					#kvbox-cells = <1>;
 					mboxes = <&dcp_asc_dcp 0>, <&dcp_asc_dcp 1>, <&dcp_asc_dcp 2>, <&dcp_asc_dcp 3>;
 					iommus = <&dcp_dart 0>;
 					dart-sid = <0>;
