@@ -417,6 +417,18 @@ config APPLE_M1_ASC_SMC_HID
 	help
 	  Say N here.
 
+config APPLE_M1_ASC_SMC_FAN
+        tristate "Apple M1 SMC fan support"
+	depends on ARCH_APPLE && OF
+	help
+	  Say N here.
+
+config APPLE_M1_ASC_SMC_LED
+        tristate "Apple M1 SMC LED support"
+	depends on ARCH_APPLE && OF
+	help
+	  Say N here.
+
 config APPLE_M1_ASC_DCP
         tristate "Apple M1 DCP endpoint support"
 	depends on ARCH_APPLE && APPLE_M1_ASC
