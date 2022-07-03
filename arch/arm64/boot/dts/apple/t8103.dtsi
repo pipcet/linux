@@ -623,6 +623,14 @@
 					mboxes = <&smc 0>;
 					kvboxes = <&smc 0>;
 				};
+				smc_led {
+					compatible = "apple,apple-asc-smc-led";
+					kvboxes = <&smc 0>;
+				};
+				smc_fan {
+					compatible = "apple,apple-asc-smc-fan";
+					kvboxes = <&smc 0>;
+				};
 			};
 		};
 
