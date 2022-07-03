@@ -158,10 +158,9 @@
 		backlight: backlight {
 			compatible = "apple,apple-m1-backlight";
 			max-brightness = <0x20d0000>;
-			/* kvboxes = <&disp 0>; */
+			kvboxes = <&dcp 0>;
 			enable-gpios = <&smc_gpio 1 0>;
 		};
-
 	};
 
 };
