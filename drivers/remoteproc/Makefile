@@ -48,3 +48,5 @@ obj-$(CONFIG_APPLE_M1_ASC_ANS)		+= apple-asc-ans.o
 obj-$(CONFIG_APPLE_M1_ASC_SMC)		+= apple-asc-smc.o
 obj-$(CONFIG_APPLE_M1_ASC_SMC_ADC)	+= apple-asc-smc-adc.o
 obj-$(CONFIG_APPLE_M1_ASC_SMC_HID)	+= apple-asc-smc-hid.o
+obj-$(CONFIG_APPLE_M1_ASC_SMC_LED)	+= apple-asc-smc-led.o
+obj-$(CONFIG_APPLE_M1_ASC_SMC_FAN)	+= apple-asc-smc-fan.o
