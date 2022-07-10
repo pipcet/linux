@@ -63,8 +63,8 @@ static void apple_syslog_message_func(struct work_struct *work)
 
 	for (; syslog->printed != syslog->toprint;
 	     syslog->printed = (syslog->printed + 1) % 0x40) {
-		for (i = 0; i < 0xa0; i++) {
-			pbuf[i] = readb(syslog->buf + syslog->printed * 0xa0
+		for (i = 0; i < 0x80; i++) {
+			pbuf[i] = readb(syslog->buf + syslog->printed * 0x80
 					+ i);
 		}
 
