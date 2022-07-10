@@ -983,18 +983,13 @@ static const struct of_device_id apple_dart_of_match[];
 
 #define APPLE_SART_MAX_ENTRIES 16
 
-static int just_sart(struct platform_device *pdev)
+static int just_sart(struct platform_device *pdev, void __iomem *sart_reg)
 {
-	void __iomem *sart_reg;
 	int i;
 	u32 buffer_config = (FIELD_PREP(APPLE_SART_CONFIG_FLAGS, 0xff) |
 			     FIELD_PREP(APPLE_SART_CONFIG_SIZE,
 					0x400000000 >> APPLE_SART_CONFIG_SIZE_SHIFT));
 	u32 paddr = 0x800000000 >> APPLE_SART_PADDR_SHIFT;
-
-	sart_reg = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(sart_reg))
-		return PTR_ERR(sart_reg);
 
 	for (i = 0; i < APPLE_SART_MAX_ENTRIES; i++) {
 		u32 config = readl(sart_reg + APPLE_SART_CONFIG(i));
@@ -1038,9 +1033,10 @@ static int apple_dart_probe(struct platform_device *pdev)
 	}
 
 	if (resource_size(res) == 0x10000) {
+		void __iomem *regs = dart->regs;
 		/* It's a SART. XXX better way to detect this. */
 		devm_kfree(dev, dart);
-		return just_sart(pdev);
+		return just_sart(pdev, regs);
 	}
 
 	if (((u64)res->start & 0xffe000000) == 0x682000000) {
