@@ -631,8 +631,10 @@ static ssize_t apple_dcp_command_debugfs_write(struct file *file,
 	}
 
 	if (apple_dcp_msg_size(&msg->header) != size) {
+		void *msg2 = devm_kzalloc(dcp->dev, apple_dcp_msg_size(&msg->header), GFP_KERNEL);
+		memcpy(msg2, msg, size);
 		devm_kfree(dcp->dev, msg);
-		return -EINVAL;
+		msg = msg2;
 	}
 	*ppos += size;
 
@@ -710,7 +712,7 @@ static int apple_dcp_debugfs_init(struct apple_dcp *dcp)
 {
 	struct dentry *dentry;
 
-	dentry = debugfs_create_dir("dcp", NULL);
+	dentry = debugfs_create_dir(dev_name(dcp->dev), NULL);
 
 	if (IS_ERR(dentry))
 		return PTR_ERR(dentry);
@@ -1026,8 +1028,8 @@ static int apple_dcp_probe(struct platform_device *pdev)
 	int ret = 0, i;
 
 	dcp = devm_kzalloc(&pdev->dev, sizeof *dcp, GFP_KERNEL);
-	if (IS_ERR(dcp))
-		return PTR_ERR(dcp);
+	if (IS_ERR(dcp) || !dcp)
+		return dcp ? PTR_ERR(dcp) : -ENOMEM;
 
 	dcp->dev = &pdev->dev;
 
