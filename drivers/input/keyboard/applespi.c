@@ -1989,11 +1989,13 @@ static int applespi_probe(struct spi_device *spi)
 	applespi->backlight_info.default_trigger = "kbd-backlight";
 	applespi->backlight_info.brightness_set  = applespi_set_bl_level;
 
-	sts = devm_led_classdev_register(&spi->dev, &applespi->backlight_info);
-	if (sts)
-		dev_warn(&applespi->spi->dev,
-			 "Unable to register keyboard backlight class dev (%d)\n",
-			 sts);
+	if (!of_property_read_bool(spi->dev.of_node, "no-backlight")) {
+		sts = devm_led_classdev_register(&spi->dev, &applespi->backlight_info);
+		if (sts)
+			dev_warn(&applespi->spi->dev,
+				 "Unable to register keyboard backlight class dev (%d)\n",
+				 sts);
+	}
 
 	/* set up debugfs entries for touchpad dimensions logging */
 	applespi->debugfs_root = debugfs_create_dir("applespi", NULL);
