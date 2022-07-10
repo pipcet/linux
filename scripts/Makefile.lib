@@ -507,7 +507,7 @@ ZSTD_LEVEL ?= 22
 ZSTD_EXTRA ?= --ultra --long
 
 quiet_cmd_zstd = ZSTD    $@
-      cmd_zstd = { cat $(real-prereqs) | $(ZSTD) -$(ZSTD_LEVEL) $(ZSTD_EXTRA) --verbose; $(size_append); } > $@
+      cmd_zstd = cat $(real-prereqs) | $(ZSTD) -$(ZSTD_LEVEL) $(ZSTD_EXTRA) --verbose > $@
 
 quiet_cmd_zstd22 = ZSTD22  $@
       cmd_zstd22 = cat $(real-prereqs) | $(ZSTD) -22 --ultra > $@
