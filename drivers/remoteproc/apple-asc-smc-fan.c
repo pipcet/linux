@@ -12,6 +12,8 @@ static int float_to_int(void *ptr)
 	u32 f = *(u32 *)ptr;
 	u32 exp = f >> 23;
 	u32 mantissa = f & ((1<<23) - 1);
+	if (f == 0)
+		return 0;
 	mantissa += (1<<23);
 	return mantissa >> (17 + (0x85 - exp));
 }
