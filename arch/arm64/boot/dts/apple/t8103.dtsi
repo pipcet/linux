@@ -703,7 +703,7 @@
 				iommus = <&dcp_dart 15>;
 			};
 			dcp_asc_oslog: dcp_asc_oslog@8 {
-				compatible = "apple,apple-asc-oslog", "apple,apple-asc-system-endpoint";
+				compatible = "apple,apple-asc-initonly", "apple,apple-asc-system-endpoint";
 				mboxes = <&dcp_asc 0x8>;
 				rprocs = <&dcp_asc>;
 			};
