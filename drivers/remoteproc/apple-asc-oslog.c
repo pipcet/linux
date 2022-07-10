@@ -78,7 +78,7 @@ static int apple_oslog_probe(struct platform_device *pdev)
 
 	struct apple_mbox_msg mbox;
 	mbox.payload = 0x300000000000000;
-	mbox.endpoint = 0x03;
+	mbox.endpoint = 0x08;
 	mbox_send_message(oslog->chan, &mbox);
 
 	return 0;
