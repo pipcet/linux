@@ -46,6 +46,7 @@ obj-$(CONFIG_APPLE_M1_ASC_IOREPORT)	+= apple-asc-iorpt.o
 obj-$(CONFIG_APPLE_M1_ASC_OSLOG)	+= apple-asc-oslog.o
 obj-$(CONFIG_APPLE_M1_ASC_DCP)		+= apple-asc-dcp.o
 obj-$(CONFIG_APPLE_M1_ASC_ANS)		+= apple-asc-ans.o
+obj-$(CONFIG_APPLE_M1_ASC_INITONLY)	+= apple-asc-initonly.o
 obj-$(CONFIG_APPLE_M1_ASC_SMC)		+= apple-asc-smc.o
 obj-$(CONFIG_APPLE_M1_ASC_SMC_ADC)	+= apple-asc-smc-adc.o
 obj-$(CONFIG_APPLE_M1_ASC_SMC_HID)	+= apple-asc-smc-hid.o

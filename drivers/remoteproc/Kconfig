@@ -464,6 +464,16 @@ config APPLE_M1_ASC_ANS
 
 	  Say Y here if you use an Apple M1 SoC system.
 
+config APPLE_M1_ASC_INITONLY
+        tristate "Apple M1 ANS endpoint support"
+	depends on ARCH_APPLE && APPLE_M1_ASC
+	help
+	  On the Apple M1 SoC, the ANS chip provides I/O
+	  capabilities. This driver exposes the ANS's shared memory to
+	  other drivers as a mailbox.
+
+	  Say Y here if you use an Apple M1 SoC system.
+
 endif # REMOTEPROC
 
 endmenu
