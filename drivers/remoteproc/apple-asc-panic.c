@@ -94,7 +94,7 @@ static void apple_panic_panic_func(struct work_struct *work)
 			pbuf[i] = readb(panic->buf + i);
 		}
 
-		print_hex_dump(KERN_EMERG, "crash:", DUMP_PREFIX_NONE,
+		print_hex_dump(KERN_WARNING, "crash:", DUMP_PREFIX_NONE,
 			       16, 1, pbuf, 128, true);
 	}
 	rproc_report_crash(panic->rproc, RPROC_FATAL_ERROR);

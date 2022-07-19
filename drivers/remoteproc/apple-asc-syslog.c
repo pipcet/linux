@@ -68,7 +68,7 @@ static void apple_syslog_message_func(struct work_struct *work)
 					+ i);
 		}
 
-		print_hex_dump(KERN_EMERG, "message:", DUMP_PREFIX_NONE,
+		print_hex_dump(KERN_INFO, "message:", DUMP_PREFIX_NONE,
 			       16, 1, pbuf, 128, true);
 	}
 

@@ -59,7 +59,7 @@ static void dump_buf(const __iomem void *buf)
 	int i;
 	for (i = 0; i < 32; i++)
 		b[i] = readl(buf + 4 * i);
-	print_hex_dump(KERN_EMERG, "message:", DUMP_PREFIX_NONE,
+	print_hex_dump(KERN_INFO, "message:", DUMP_PREFIX_NONE,
 		       16, 1, b, 128, true);
 	printk("---");
 }

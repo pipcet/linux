@@ -96,10 +96,10 @@ static void apple_dcp_msg_print(struct apple_dcp_msg *msg)
 	       (int)msg->header.len_input,
 	       (int)msg->header.len_output);
 
-	print_hex_dump(KERN_EMERG, "H:", DUMP_PREFIX_OFFSET, 16, 1, msg->data-12, 12, true);
-	print_hex_dump(KERN_EMERG, "I:", DUMP_PREFIX_OFFSET, 16, 1, msg->data, msg->header.len_input, true);
-	print_hex_dump(KERN_EMERG, "O:", DUMP_PREFIX_OFFSET, 16, 1, msg->data + msg->header.len_input, msg->header.len_output, true);
-	//print_hex_dump(KERN_EMERG, "C:", DUMP_PREFIX_OFFSET, 16, 1, msg->data - 12, msg->header.len_input + msg->header.len_output + 12, true);
+	print_hex_dump(KERN_INFO, "H:", DUMP_PREFIX_OFFSET, 16, 1, msg->data-12, 12, true);
+	print_hex_dump(KERN_INFO, "I:", DUMP_PREFIX_OFFSET, 16, 1, msg->data, msg->header.len_input, true);
+	print_hex_dump(KERN_INFO, "O:", DUMP_PREFIX_OFFSET, 16, 1, msg->data + msg->header.len_input, msg->header.len_output, true);
+	//print_hex_dump(KERN_INFO, "C:", DUMP_PREFIX_OFFSET, 16, 1, msg->data - 12, msg->header.len_input + msg->header.len_output + 12, true);
 }
 #endif
 

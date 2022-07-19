@@ -114,7 +114,7 @@ static void apple_ioreport_ioreport_func(struct work_struct *work)
 		pbuf[i] = readb(ioreport->buf + i);
 	}
 
-	print_hex_dump(KERN_EMERG, "IORPT:", DUMP_PREFIX_NONE,
+	print_hex_dump(KERN_INFO, "IORPT:", DUMP_PREFIX_NONE,
 		       16, 1, pbuf, 128, true);
 	//rproc_report_crash(iorpt->rproc, RPROC_FATAL_ERROR);
 }
