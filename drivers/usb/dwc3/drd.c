@@ -495,7 +495,9 @@ static enum usb_role dwc3_usb_role_switch_get(struct usb_role_switch *sw)
 
 static int dwc3_setup_role_switch(struct dwc3 *dwc)
 {
-	struct usb_role_switch_desc dwc3_role_switch = {NULL};
+	struct usb_role_switch_desc dwc3_role_switch = {
+		.allow_userspace_control = true,
+	};
 	u32 mode;
 
 	dwc->role_switch_default_mode = usb_get_role_switch_default_mode(dwc->dev);
