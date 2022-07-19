@@ -142,6 +142,7 @@
 			pinctrl-names = "default";
 			#address-cells = <0x1>;
 			#size-cells = <0x0>;
+			usb-role-switch;
 
 			hpm0: hpm0@38 {
 				compatible = "ti,tps6598x";
@@ -151,10 +152,12 @@
 
 				no-long-writes;
 
+				usb-role-switch;
 				typec0: connector {
 					compatible = "usb-c-connector";
 					label = "USB-C B";
 					power-role = "source";
+					usb-role-switch;
 
 					ports {
 						#address-cells = <1>;
@@ -182,6 +185,8 @@
 				interrupts = <106 8>;
 
 				no-long-writes;
+
+				usb-role-switch;
 
 				typec1: connector {
 					compatible = "usb-c-connector";
@@ -246,7 +251,7 @@
             reg = <0x3 0x80000000 0x0 0x1000000
                    0x3 0x82000000 0x0 0x1080000>;
             #phy-cells = <0>;
-            usb-role-switch;
+	    //usb-role-switch;
             orientation-switch;
             mode-switch;
             accessory;
@@ -346,6 +351,8 @@
 				interrupts = <AIC_IRQ 777 IRQ_TYPE_LEVEL_HIGH>;
 				usb-role-switch;
 				iommus = <&dwc3_0_dart_0 0>, <&dwc3_0_dart_1 1>;
+				role-switch-default-mode = "host";
+				ports {
 				port@0 {
 					reg = <0>;
 					typec0_usb_hs: endpoint {
@@ -357,6 +364,7 @@
 					typec0_usb_ss: endpoint {
 						remote-endpoint = <&typec0_pipe_ss>;
 					};
+				};
 				};
 			};
 		};
@@ -393,6 +401,7 @@
 				interrupts = <AIC_IRQ 857 IRQ_TYPE_LEVEL_HIGH>;
 				iommus = <&dwc3_1_dart_0 0>, <&dwc3_1_dart_1 1>;
 				usb-role-switch;
+				role-switch-default-mode = "host";
 				port@0 {
 					reg = <0>;
 					typec1_usb_hs: endpoint {
