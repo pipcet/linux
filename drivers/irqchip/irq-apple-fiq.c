@@ -206,7 +206,6 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 	 * but such a register does not seem to exist.
 	 *
 	 * So, we have these potential sources to test for:
-	 *  - Fast IPIs (not yet used)
 	 *  - The 4 timers (CNTP, CNTV for each of HV and guest)
 	 *  - Per-core PMCs (not yet supported)
 	 *  - Per-cluster uncore PMCs (not yet supported)
@@ -215,16 +214,19 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 	 * we check for everything here, even things we don't support yet.
 	 */
 
+#if 0
 	if (read_sysreg_s(SYS_IMP_APL_IPI_SR_EL1) & IPI_SR_PENDING) {
 		write_sysreg_s(IPI_SR_PENDING, SYS_IMP_APL_IPI_SR_EL1);
 		generic_handle_domain_irq(ic->ipi_domain, 0);
 	}
+#endif
 
 	if (TIMER_FIRING(read_sysreg(cntp_ctl_el0)))
 
 		generic_handle_domain_irq(ic->domain, FIQ_TMR_EL0_PHYS);
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
 		generic_handle_domain_irq(ic->domain, FIQ_TMR_EL0_VIRT);
+#if 0
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
 
@@ -256,6 +258,7 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 		sysreg_clear_set_s(SYS_IMP_APL_UPMCR0_EL1, UPMCR0_IMODE,
 				   FIELD_PREP(UPMCR0_IMODE, UPMCR0_IMODE_OFF));
 	}
+#endif
 }
 
 static int fiq_set_type(struct irq_data *d, unsigned int type)
@@ -421,13 +424,16 @@ static int fiq_init_cpu(unsigned int cpu)
 {
 	/* Mask all hard-wired per-CPU FIQ sources */
 
+#if 0
 	/* Pending Fast IPI FIQs */
 	write_sysreg_s(IPI_SR_PENDING, SYS_IMP_APL_IPI_SR_EL1);
+#endif
 
 	/* Timer FIQs */
 	sysreg_clear_set(cntp_ctl_el0, 0, ARCH_TIMER_CTRL_IT_MASK);
 	sysreg_clear_set(cntv_ctl_el0, 0, ARCH_TIMER_CTRL_IT_MASK);
 
+#if 0
 	/* EL2-only (VHE mode) IRQ sources */
 	if (is_kernel_in_hyp_mode()) {
 		/* Guest timers */
@@ -443,6 +449,7 @@ static int fiq_init_cpu(unsigned int cpu)
 	sysreg_clear_set_s(SYS_IMP_APL_UPMCR0_EL1, UPMCR0_IMODE,
 			   FIELD_PREP(UPMCR0_IMODE, UPMCR0_IMODE_OFF));
 
+#endif
 	/* Commit all of the above */
 	isb();
 
@@ -459,7 +466,7 @@ static int fiq_init_cpu(unsigned int cpu)
 static enum irqreturn fiq_handler(int irq, void *ptr)
 {
 	if ((read_sysreg_s(SYS_IMP_APL_PMCR0_EL1) & (PMCR0_IMODE | PMCR0_IACT)) ==
-			(FIELD_PREP(PMCR0_IMODE, PMCR0_IMODE_FIQ) | PMCR0_IACT)) {
+	    (FIELD_PREP(PMCR0_IMODE, PMCR0_IMODE_FIQ) | PMCR0_IACT)) {
 		/*
 		 * Not supported yet, let's figure out how to handle this when
 		 * we implement these proprietary performance counters. For now,
@@ -520,6 +527,7 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 		}
 	}
 
+	set_handle_irq(handle_fiq);
 	set_handle_fiq(handle_fiq);
 
 	if (!is_kernel_in_hyp_mode())
