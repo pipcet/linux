@@ -459,6 +459,8 @@ static int __init aic_of_ic_init(struct device_node *node, struct device_node *p
 	struct aic_irq_chip *irqc;
 	bool use_for_ipi = of_property_read_bool(node, "use-for-ipi");
 
+	return 0;
+
 	regs = of_iomap(node, 0);
 	if (WARN_ON(!regs))
 		return -EIO;
