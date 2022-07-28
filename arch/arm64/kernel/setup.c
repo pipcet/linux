@@ -237,8 +237,8 @@ static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 	struct apple_bootargs *bootargs = orig_bootargs;
 	bool framebuffer_enabled = bootargs->framebuffer.phys_base != 0;
 	memcpy(&mangled_bootargs, orig_bootargs, sizeof(mangled_bootargs));
-	if (bootargs->framebuffer.height <= 1024 ||
-	    bootargs->framebuffer.width <= 1024)
+	if (bootargs->framebuffer.height < 1024 ||
+	    bootargs->framebuffer.width < 1024)
 		framebuffer_enabled = false;
 
 	if (!framebuffer_enabled) {
