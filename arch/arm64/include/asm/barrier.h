@@ -15,10 +15,10 @@
 #define nops(n)		asm volatile(__nops(n))
 
 #define sev()		asm volatile("sev" : : : "memory")
-#define wfe()		asm volatile("wfe" : : : "memory")
+#define wfe()		do { } while (0) // asm volatile("wfe" : : : "memory")
 #define wfet(val)	asm volatile("msr s0_3_c1_c0_0, %0"	\
 				     : : "r" (val) : "memory")
-#define wfi()		asm volatile("wfi" : : : "memory")
+#define wfi()		do { } while (0) // asm volatile("wfi" : : : "memory")
 #define wfit(val)	asm volatile("msr s0_3_c1_c0_1, %0"	\
 				     : : "r" (val) : "memory")
 
