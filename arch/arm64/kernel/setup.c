@@ -243,7 +243,7 @@ static void __init fixup_fdt(u64 bootargs_phys, u64 base)
 
 	if (!framebuffer_enabled) {
 #define FB_SIZE (32 << 20) /* enough for any red-blooded 4k screen */
-#define MEMTOP (0x800000000 + (bootargs->mem_size))
+#define MEMTOP ((bootargs->phys_base) + (bootargs->mem_size))
 		bootargs->framebuffer.phys_base = MEMTOP - FB_SIZE;
 		bootargs->mem_size -= FB_SIZE;
 		set_fb_physical_address(bootargs->framebuffer.phys_base,
