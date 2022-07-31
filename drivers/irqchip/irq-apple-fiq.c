@@ -226,6 +226,7 @@ static void __exception_irq_entry handle_fiq(struct pt_regs *regs)
 		generic_handle_domain_irq(ic->domain, FIQ_TMR_EL0_PHYS);
 	if (TIMER_FIRING(read_sysreg(cntv_ctl_el0)))
 		generic_handle_domain_irq(ic->domain, FIQ_TMR_EL0_VIRT);
+	generic_handle_domain_irq(ic->domain, FIQ_OTHER);
 #if 0
 	if (is_kernel_in_hyp_mode()) {
 		uint64_t enabled = read_sysreg_s(SYS_IMP_APL_VM_TMR_FIQ_ENA_EL2);
@@ -310,11 +311,16 @@ static struct irq_chip fiq_ipi_chip = {
  */
 
 static int irq_domain_map(struct irq_domain *id, unsigned int irq,
-			  irq_hw_number_t hw)
+			  irq_hw_number_t hw, int rirq)
 {
-	irq_set_percpu_devid(irq);
-	irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
-			    handle_percpu_devid_irq, NULL, NULL);
+	if (hw < 4) {
+		irq_set_percpu_devid(irq);
+		irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
+				    handle_percpu_devid_irq, NULL, NULL);
+	} else {
+		irq_domain_set_info(id, irq, hw, &fiq_chip, id->host_data,
+				    handle_fasteoi_irq, NULL, NULL);
+	}
 
 	return 0;
 }
@@ -375,7 +381,7 @@ static int irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 		return ret;
 
 	for (i = 0; i < nr_irqs; i++) {
-		ret = irq_domain_map(domain, virq + i, hwirq + i);
+		ret = irq_domain_map(domain, virq + i, hwirq + i, i);
 		if (ret)
 			return ret;
 	}
@@ -537,9 +543,11 @@ static int __init fiq_of_ic_init(struct device_node *node, struct device_node *p
 			  "irqchip/apple-fiq/fiq:starting",
 			  fiq_init_cpu, NULL);
 
+#if 0
 	if (__irq_resolve_mapping(ic->domain, FIQ_OTHER, &fiq_other))
 		WARN_ON(request_irq(fiq_other, fiq_handler, IRQF_SHARED,
 				    "PMC FIQ handler", ic) < 0);
+#endif
 
 	pr_info("Initialized with %d FIQs, %sused for IPI\n", NR_FIQ,
 		use_for_ipi ? "" : "not ");;
